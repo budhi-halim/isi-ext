@@ -1,0 +1,24 @@
+import { mergeProducts, splitIssuedProduct, splitRequestedProduct } from './product-logic.js';
+
+/** Session storage is accessed by the trusted worker, never exposed to page scripts. */
+export function productSession(account) {
+  if (!account) return null;
+  async function request(type, record) {
+    const result = await chrome.runtime.sendMessage({ type, account, record });
+    if (!result?.ok) throw new Error('Product session cache unavailable');
+    return result.value;
+  }
+  return {
+    load: async () => (await request('product-cache-read')).map(record => {
+      const url = new URL(record.url);
+      if (!/\/samplerequest\/edit$/i.test(url.pathname) || !/^[2-5]$/.test(url.searchParams.get('srtype'))) return record;
+      const products=record.value.products.map(product => product.code ? product : {
+        ...product,...(product.requested ? splitRequestedProduct(product.name) : splitIssuedProduct(product.name)),
+      });
+      return {...record,value:{...record.value,products:mergeProducts(
+        products.filter(product=>product.requested),products.filter(product=>!product.requested),
+      )}};
+    }),
+    save: record => request('product-cache-write', record),
+  };
+}

@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "include": [
+    "index.html",
+    "css",
+    "js",
+    "assets",
+    "extension-versions.json"
+  ],
+  "extensions": [
+    {
+      "directory": "Islandsun-Portal-Workspace",
+      "include": [
+        "manifest.json",
+        "popup.html",
+        "offline.html",
+        "offline-parser.html",
+        "content.js",
+        "css",
+        "js",
+        "assets"
+      ]
+    },
+    {
+      "directory": "Islandsun-Revenue",
+      "include": [
+        "manifest.json",
+        "popup.html",
+        "popup.js",
+        "scraper.html",
+        "scraper.js",
+        "xlsx.full.min.js",
+        "css",
+        "js",
+        "assets"
+      ]
+    },
+    {
+      "directory": "IslandSun-AutoFeedback",
+      "include": [
+        "manifest.json",
+        "popup.html",
+        "content.js",
+        "css",
+        "js",
+        "assets"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "Islandsun AutoFeedback",
+  "version": "1.1.5",
+  "description": "Fill feedback forms for old, uncancelled sample requests with blank feedback.",
+  "permissions": [
+    "storage",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://apps.islandsunindonesia.com/*",
+    "https://budhi-halim.github.io/*"
+  ],
+  "background": {
+    "service_worker": "js/background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "assets/family/assets/icons/feedback-16.png",
+    "32": "assets/family/assets/icons/feedback-32.png",
+    "48": "assets/family/assets/icons/feedback-48.png",
+    "128": "assets/family/assets/icons/feedback-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/family/assets/icons/feedback-16.png",
+      "32": "assets/family/assets/icons/feedback-32.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://apps.islandsunindonesia.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "js/content.js",
+        "js/logic.js",
+        "js/automation.js",
+        "js/overlay.js",
+        "css/overlay.css",
+        "assets/family/css/tokens.css",
+        "assets/family/css/components.css",
+        "assets/family/css/notifications.css",
+        "assets/family/css/theme-control.css",
+        "assets/family/js/extension-session.js",
+        "assets/family/assets/icons/feedback.svg"
+      ],
+      "matches": [
+        "*://apps.islandsunindonesia.com/*"
+      ]
+    }
+  ]
+}

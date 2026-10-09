@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" class="isi-theme">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Revenue Extractor</title>
+  <link rel="stylesheet" href="assets/family/css/tokens.css">
+  <link rel="stylesheet" href="assets/family/css/components.css">
+  <link rel="stylesheet" href="assets/family/css/interaction.css">
+  <link rel="stylesheet" href="assets/family/css/extension-popup.css">
+  <link rel="stylesheet" href="css/update-popup.css">
+  <script type="module" src="popup.js"></script>
+  <script type="module" src="assets/family/js/navigation.js"></script>
+</head>
+<body class="isi-ui" data-family-app>
+  <header class="popup-header"><img src="assets/family/assets/icons/revenue.svg" width="44" height="44" alt=""></header>
+  <main>
+    <h1>Revenue Extractor</h1>
+    <section id="connection-state" aria-live="polite" data-state="checking"><span id="connection-spinner" class="isi-spinner" aria-hidden="true"></span><h2 id="state-title">Checking connection</h2><p id="state-message" class="isi-muted">Checking your company session…</p></section>
+    <button type="button" id="login-button" class="isi-button isi-button--primary" hidden>Go to Login Page</button>
+    <button type="button" id="dashboard-button" class="isi-button isi-button--primary" hidden>Open Dashboard</button>
+    <button type="button" id="retry-button" class="isi-button" hidden>Check again</button>
+  </main>
+  <footer><a href="https://budhi-halim.github.io/isi-share/" class="isi-button isi-button--quiet" data-family-home target="_blank" rel="noopener">All apps</a></footer>
+</body>
+</html>

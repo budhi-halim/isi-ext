@@ -1,0 +1,10 @@
+.popup-updates {
+  display: grid;
+  gap: 10px;
+  margin-block-start: 20px;
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--isi-border);
+}
+.popup-updates p { margin: 0; font-size: 12px; line-height: 1.5; }
+.popup-updates p:empty { display: none; }
+.popup-updates [hidden] { display: none !important; }

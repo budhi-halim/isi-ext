@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" class="isi-theme">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Portal Workspace</title>
+  <link rel="icon" href="assets/icons/portal-workspace.svg">
+  <link rel="stylesheet" href="assets/family/css/tokens.css">
+  <link rel="stylesheet" href="assets/family/css/components.css">
+  <link rel="stylesheet" href="assets/family/css/extension-popup.css">
+  <link rel="stylesheet" href="css/popup.css">
+  <link rel="stylesheet" href="css/update-popup.css">
+  <script type="module" src="js/popup.js"></script>
+</head>
+<body class="isi-ui" data-signed-in="false">
+  <header class="popup-header"><img src="assets/icons/portal-workspace.svg" width="44" height="44" alt=""></header>
+  <main>
+    <h1>Portal Workspace</h1>
+    <section id="connection-state" aria-live="polite"><h2 id="state-title">Always ready</h2><p class="isi-muted">Your Islandsun workspace, with automatic document naming.</p></section>
+    <label class="setting"><span>Enabled</span><input id="enabled" type="checkbox" role="switch" checked><span class="isi-toggle-track" aria-hidden="true"></span></label>
+    <button type="button" id="open-portal" class="isi-button isi-button--primary">Open Islandsun</button>
+    <a href="offline.html" target="_blank" rel="noopener" class="isi-button">Open saved offline copy</a>
+    <details data-account-settings id="advanced-settings" class="connection-diagnostics">
+      <summary>Advanced settings</summary>
+      <p class="isi-muted">These preferences belong to your signed-in account. New accounts start with default settings.</p>
+      <p id="settings-account" class="isi-muted"></p>
+      <label class="setting"><span>Keep session active</span><input id="keep-session-active" type="checkbox" role="switch" checked aria-describedby="session-status"><span class="isi-toggle-track" aria-hidden="true"></span></label>
+      <p id="session-status" role="status" class="isi-muted">Checks your sign-in every five minutes while the browser is running.</p>
+      <label class="setting"><span>Save offline records</span><input id="offline-enabled" type="checkbox" role="switch" checked><span class="isi-toggle-track" aria-hidden="true"></span></label>
+      <p id="offline-status" class="isi-muted" role="status">The offline copy fills in while you are signed in.</p>
+      <label class="setting"><span>Save document files</span><input id="offline-documents" type="checkbox" role="switch" checked aria-describedby="document-setting-help"><span class="isi-toggle-track" aria-hidden="true"></span></label>
+      <p id="document-setting-help" class="isi-muted">Save available PDFs and attachments too. Turning this off keeps files already saved.</p>
+      <p id="archive-usage" role="status">Open these settings to check saved storage.</p>
+      <button type="button" id="refresh-storage" class="isi-button isi-button--quiet">Refresh storage usage</button>
+      <button type="button" id="clear-account-archive" class="isi-button" disabled>Delete my offline copy</button>
+      <button type="button" id="clear-all-archives" class="isi-button">Delete all offline copies</button>
+      <p class="isi-muted">Deletion pauses offline saving for the signed-in account. Live portal records and notification history are unchanged.</p>
+      <p id="archive-settings-message" role="status"></p>
+    </details>
+    <p id="message" role="status" class="isi-muted"></p>
+    <details data-account-settings class="connection-diagnostics">
+      <summary>Connection diagnostics</summary>
+      <p class="isi-muted">Recent request timing and failures. No record contents or credentials.</p>
+      <button type="button" id="copy-diagnostics" class="isi-button isi-button--quiet">Copy diagnostics</button>
+      <p id="diagnostics-status" role="status"></p>
+    </details>
+  </main>
+  <dialog id="archive-delete-dialog" aria-labelledby="archive-delete-title" aria-describedby="archive-delete-description">
+    <h2 id="archive-delete-title">Delete saved offline copy?</h2>
+    <p id="archive-delete-description"></p>
+    <div class="archive-dialog-actions"><button type="button" id="cancel-archive-delete" class="isi-button" autofocus>Cancel</button><button type="button" id="confirm-archive-delete" class="isi-button isi-button--primary">Delete copy</button></div>
+  </dialog>
+  <footer><a href="https://budhi-halim.github.io/isi-share/" class="isi-button isi-button--quiet" target="_blank" rel="noopener">All apps</a></footer>
+</body>
+</html>

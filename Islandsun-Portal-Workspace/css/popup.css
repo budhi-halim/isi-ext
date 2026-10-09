@@ -1,0 +1,26 @@
+.isi-ui .setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block: 16px; }
+.isi-ui .setting { position: relative; cursor: pointer; }
+.isi-ui .setting input[role="switch"] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.isi-ui .setting .isi-toggle-track { width: 42px; height: 24px; border-radius: 24px; padding: 3px; background: var(--isi-border); flex: none; }
+.isi-ui .setting .isi-toggle-track::after { content: ''; display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--isi-surface); transition: transform 160ms; }
+.isi-ui .setting input:checked + .isi-toggle-track { background: var(--isi-primary); }
+.isi-ui .setting input:checked + .isi-toggle-track::after { transform: translateX(18px); background: var(--isi-on-primary); }
+.isi-ui .setting input:focus-visible + .isi-toggle-track { outline: 3px solid var(--isi-primary); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .isi-ui .setting .isi-toggle-track::after { transition: none; } }
+.isi-ui .setting select { width: auto; }
+#message:empty { display: none; }
+#session-status { margin-block: 0 16px; font-size: 12px; line-height: 1.5; }
+.connection-diagnostics { margin-block: 16px; border-top: 1px solid var(--isi-border); padding-block-start: 12px; font-size: 12px; }
+.connection-diagnostics summary { cursor: pointer; color: var(--isi-muted); }
+.connection-diagnostics p { line-height: 1.5; }
+#diagnostics-status:empty { display: none; }
+#advanced-settings > button { margin-block: 8px; width: 100%; }
+#archive-settings-message:empty { display: none; }
+#archive-delete-dialog { box-sizing: border-box; width: calc(100% - 24px); max-height: calc(100dvh - 24px); overflow: auto; padding: 20px; border: 1px solid var(--isi-border); border-radius: var(--isi-radius); background: var(--isi-surface); color: var(--isi-text); }
+#archive-delete-dialog::backdrop { background: oklch(10% 0.02 255 / .65); backdrop-filter: blur(4px); }
+#archive-delete-dialog h2 { margin-block-start: 0; }
+#archive-delete-dialog p { line-height: 1.5; }
+.archive-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+@media (max-width: 600px), (max-height: 420px) { .isi-ui .setting.isi-theme-toggle { display: none; } }
+
+body[data-signed-in="false"] [data-account-settings], body[data-signed-in="false"] .popup-updates { display: none !important; }

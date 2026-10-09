@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "IslandSun Revenue Extractor",
+  "version": "1.1.6",
+  "description": "Automated data extraction tool for Delivery and Sales Orders.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/family/assets/icons/revenue-16.png",
+      "32": "assets/family/assets/icons/revenue-32.png",
+      "48": "assets/family/assets/icons/revenue-48.png",
+      "128": "assets/family/assets/icons/revenue-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/family/assets/icons/revenue-16.png",
+    "32": "assets/family/assets/icons/revenue-32.png",
+    "48": "assets/family/assets/icons/revenue-48.png",
+    "128": "assets/family/assets/icons/revenue-128.png"
+  },
+  "permissions": [
+    "downloads",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://apps.islandsunindonesia.com/*",
+    "https://budhi-halim.github.io/*"
+  ],
+  "background": {
+    "service_worker": "js/background.js",
+    "type": "module"
+  }
+}

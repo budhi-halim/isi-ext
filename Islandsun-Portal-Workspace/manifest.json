@@ -1,0 +1,101 @@
+{
+  "manifest_version": 3,
+  "name": "Islandsun Portal Workspace",
+  "version": "1.4.57",
+  "description": "An Islandsun workspace with product previews, document downloads, notifications, and a protected offline copy.",
+  "permissions": [
+    "downloads",
+    "storage",
+    "alarms",
+    "offscreen",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "http://apps.islandsunindonesia.com/*",
+    "https://apps.islandsunindonesia.com/*",
+    "https://budhi-halim.github.io/*"
+  ],
+  "background": {
+    "service_worker": "js/background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "assets/icons/portal-workspace-16.png",
+    "32": "assets/icons/portal-workspace-32.png",
+    "48": "assets/icons/portal-workspace-48.png",
+    "128": "assets/icons/portal-workspace-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/icons/portal-workspace-16.png",
+      "32": "assets/icons/portal-workspace-32.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://apps.islandsunindonesia.com/islandsun/*"
+      ],
+      "js": [
+        "js/dashboard-demo-guard.js",
+        "js/alerts.js",
+        "js/native-form-submit.js",
+        "js/tir-select-widget.js",
+        "js/tir-source-loading.js",
+        "js/improvement-loading-bridge.js",
+        "js/session-activity.js",
+        "js/table-activity.js",
+        "js/sales-row-lookups.js",
+        "js/table-request.js",
+        "js/table-density-logic.js",
+        "js/table-density.js",
+        "js/table-search.js",
+        "js/date-selection.js",
+        "js/calendar-widget.js",
+        "js/sample-dates.js",
+        "js/sample-price-logic.js",
+        "js/sample-prices.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "http://apps.islandsunindonesia.com/islandsun/*"
+      ],
+      "js": [
+        "js/navigation-transition.js",
+        "js/editor-guard.js",
+        "js/table-activity-bridge.js",
+        "content.js"
+      ],
+      "css": [
+        "assets/family/css/tokens.css",
+        "assets/family/css/theme-control.css",
+        "assets/family/css/notifications.css",
+        "assets/family/css/row-hover.css",
+        "css/portal.css",
+        "css/operational.css"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "js/*.js",
+        "js/shared/*.js",
+        "assets/icons/*.svg",
+        "assets/family/js/*.js",
+        "assets/family/assets/icons/*.svg"
+      ],
+      "matches": [
+        "http://apps.islandsunindonesia.com/*"
+      ]
+    }
+  ],
+  "optional_permissions": [
+    "management"
+  ]
+}

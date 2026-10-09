@@ -1,0 +1,21 @@
+.isi-portal-products {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 28px;
+  border: 1px solid var(--isi-border);
+  border-radius: var(--isi-radius);
+  background: var(--isi-surface);
+  color: var(--isi-text);
+  box-shadow: var(--isi-shadow);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.isi-portal-products::backdrop { background: oklch(10% .02 250 / .55); }
+.isi-portal-products h2 { font-size: 18px; margin: 0 44px 20px 0; }
+.isi-portal-product { display: flex; align-items: center; gap: 14px; border-top: 1px solid var(--isi-border); padding-block: 10px; }
+.isi-portal-product > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.isi-portal-product p { margin: 0; }
+.isi-portal-product [data-muted] { color: var(--isi-muted); font-size: 13px; }
+.isi-portal-product[data-requested] { font-style: italic; }
+.isi-portal-products .isi-portal-icon-button { width: 32px; min-height: 32px; padding: 5px; flex-shrink: 0; background: transparent; }
+.isi-portal-products .isi-portal-dialog-close { position: absolute; top: 18px; right: 18px; width: 40px; min-height: 40px; padding: 8px; }

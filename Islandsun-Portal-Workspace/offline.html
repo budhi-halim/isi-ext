@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en" class="isi-theme">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Islandsun • Saved workspace</title>
+  <link rel="icon" href="assets/family/assets/icons/family.svg">
+  <link rel="stylesheet" href="assets/family/css/tokens.css">
+  <link rel="stylesheet" href="assets/family/css/components.css">
+  <link rel="stylesheet" href="assets/family/css/notifications.css">
+  <link rel="stylesheet" href="assets/family/css/row-hover.css">
+  <link rel="stylesheet" href="css/product-preview.css">
+  <link rel="stylesheet" href="css/offline.css">
+  <script type="module" src="js/offline-ui.js"></script>
+</head>
+<body class="isi-ui offline-workspace" data-access="checking">
+  <header class="offline-header">
+    <a class="isi-brand" href="offline.html"><img src="assets/family/assets/icons/family.svg" alt="" width="40" height="40"><span>Islandsun<small>Company portal</small></span></a>
+    <button id="navigation-toggle" class="isi-button offline-icon-button" type="button" aria-label="Toggle navigation" aria-controls="sections" aria-expanded="true"></button>
+    <div class="offline-actions"><span id="account-name" class="offline-account"></span><button id="lock-offline" class="isi-button" type="button">Lock</button><button id="theme" class="isi-button offline-icon-button" type="button" aria-label="Switch to dark mode"></button><a class="isi-button offline-live-link" href="http://apps.islandsunindonesia.com:81/islandsun/login" target="_blank" rel="noopener">Open live portal</a></div>
+  </header>
+  <section id="offline-sign-in" aria-labelledby="offline-sign-in-title" hidden>
+    <form id="offline-login-form" class="isi-card" novalidate>
+      <img src="assets/family/assets/icons/family.svg" width="48" height="48" alt="">
+      <h1 id="offline-sign-in-title">Open your saved workspace</h1>
+      <p id="offline-access-description" class="isi-muted">Sign in locally with your portal username and password. No internet connection is needed.</p>
+      <div id="offline-device-accounts" hidden><label for="offline-account-choice">Saved account</label><select id="offline-account-choice"></select></div>
+      <div id="offline-credential-fields">
+      <label for="offline-username">Username</label><input id="offline-username" name="username" autocomplete="username" required>
+      <label id="offline-password-label" for="offline-password">Password</label><input id="offline-password" name="password" type="password" autocomplete="current-password" required aria-describedby="offline-login-help offline-login-error">
+      <p id="offline-login-help" class="isi-muted">Use the password from your last successful online sign-in with Portal Workspace enabled. One unlock covers your offline pages for this browser session.</p>
+      </div>
+      <p id="offline-login-error" role="alert"></p>
+      <button id="offline-unlock" class="isi-button isi-button--primary" type="submit">Open saved copy</button>
+      <button id="offline-previous-password" class="isi-button isi-button--quiet" type="button">Changed your portal password?</button>
+    </form>
+  </section>
+  <aside class="offline-banner" aria-label="Saved copy notice"><details id="offline-notice"><summary><strong class="offline-notice-full">Saved offline copy · Read only</strong><strong class="offline-notice-short">Offline · Read only</strong><span id="offline-notice-time">No saved snapshot selected.</span></summary><div class="offline-notice-details"><span id="offline-protection"></span><span id="snapshot-time">No saved snapshot selected.</span><a id="recovered" hidden href="http://apps.islandsunindonesia.com:81/islandsun/login" target="_blank" rel="noopener">Server available — sign in</a></div></details></aside>
+  <nav id="sections" aria-label="Saved records"></nav>
+  <main>
+    <div id="list-view">
+    <div class="offline-heading"><div><h1 id="title">Saved records</h1><p id="coverage" class="isi-muted" role="status">Opening your local archive…</p></div><button id="refresh" class="isi-button" type="button">Refresh saved view</button></div>
+    <nav id="stock-card-views" class="offline-view-switch" aria-label="Stock views" hidden></nav>
+    <div id="availability-views" class="offline-view-switch" role="group" aria-label="Availability view" hidden><button id="calendar-view-button" class="isi-button" type="button" aria-pressed="false">Availability calendar</button><button id="table-view-button" class="isi-button" type="button" aria-pressed="true">Availability table</button></div>
+    <section class="isi-card offline-table-card" aria-label="Record list">
+      <details id="filters"><summary>Filters</summary><div class="offline-filters">
+        <label>Status<select id="status"><option value="">All statuses</option></select></label>
+        <div id="reporting-period-label" hidden><label for="reporting-period">Reporting month</label><select id="reporting-period"><option value="">All saved months</option></select></div>
+        <div id="availability-category-label" hidden><label for="availability-category">Schedule status (saved)</label><select id="availability-category"><option value="">All schedule statuses</option></select></div>
+        <label>From<input id="from" type="date"></label><label>To<input id="to" type="date"></label>
+        <button id="reset" class="isi-button" type="button">Reset</button>
+      </div></details>
+      <div class="offline-toolbar"><label>Show<select id="page-size" aria-label="Entries per page"><option>10</option><option selected>25</option><option>50</option><option>100</option></select>entries</label><div class="offline-table-tools"><label>Search<input id="search" type="search" placeholder="Number, customer, product…" autocomplete="off"></label><details class="offline-columns"><summary>Columns</summary><div id="columns"></div></details></div></div>
+      <div class="offline-table-scroll" tabindex="0" aria-label="Scrollable saved records"><table><thead id="head"></thead><tbody id="rows"></tbody></table><p id="empty" hidden></p></div>
+      <div class="offline-pagination"><p id="count" role="status"></p><div><button id="previous" class="isi-button" type="button">Previous</button><span id="page-number"></span><button id="next" class="isi-button" type="button">Next</button></div></div>
+    </section>
+    <section id="availability-calendar" class="isi-card offline-calendar" aria-labelledby="calendar-title" hidden>
+      <div class="offline-calendar-toolbar"><h2 id="calendar-title" data-calendar-heading></h2><div><button class="isi-button" type="button" data-calendar-offset="-12" aria-label="Previous year">«</button><button class="isi-button" type="button" data-calendar-offset="-1" aria-label="Previous month">‹</button><button class="isi-button" type="button" data-calendar-today>Today</button><button class="isi-button" type="button" data-calendar-offset="1" aria-label="Next month">›</button><button class="isi-button" type="button" data-calendar-offset="12" aria-label="Next year">»</button><label>Month<input type="month" data-calendar-month min="0001-01" max="9999-12"></label></div></div>
+      <p data-calendar-count class="isi-muted" role="status"></p>
+      <div class="offline-calendar-scroll" tabindex="0" aria-label="Scrollable availability calendar"><div class="offline-calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div><div data-calendar-grid class="offline-calendar-grid"></div></div>
+    </section>
+    <details class="offline-storage">
+      <summary>Archive coverage and storage</summary>
+      <div class="offline-storage-content" role="region" aria-label="Archive coverage and storage">
+      <button id="close-archive-panel" class="isi-button" type="button">Close archive panel</button>
+      <p id="connection"></p>
+      <button id="unlock-archive" class="isi-button" type="button" hidden>Unlock saved copy</button>
+      <section id="debug-capture" aria-labelledby="debug-capture-title">
+        <h2 id="debug-capture-title">Diagnostic recording</h2>
+          <p>Record archive, preview and session-check responses, processing, navigation state and shared queue activity. Captures stay on this device, protected with this account’s offline key. Downloaded bundles contain private business data; share them only for this investigation.</p>
+          <p>Recording does not increase request concurrency or submit records. It stops after 15 minutes, 10,000 events or 64 MB. Individual responses are limited to 8 MB and marked if incomplete. Login pages and known credential fields are excluded. Native page/table response bodies and Revenue Extractor traffic are not captured.</p>
+        <p data-debug-status role="status"></p>
+        <p data-debug-message role="status"></p>
+        <div class="offline-report-actions">
+          <button class="isi-button" type="button" data-debug-start>Start diagnostic capture</button>
+          <button class="isi-button" type="button" data-debug-stop disabled>Stop capture</button>
+          <button class="isi-button" type="button" data-debug-download disabled>Download diagnostic bundle</button>
+          <button class="isi-button" type="button" data-debug-clear disabled>Delete diagnostic capture</button>
+        </div>
+      </section>
+      <section id="archive-report" aria-labelledby="archive-report-title">
+        <h2 id="archive-report-title">Archive verification report</h2>
+        <p data-report-status role="status"></p>
+        <div class="offline-report-actions">
+          <button class="isi-button" type="button" data-report-refresh>Generate archive report</button>
+          <button class="isi-button" type="button" data-report-copy disabled>Copy archive verification report</button>
+          <button class="isi-button" type="button" data-report-download disabled>Download archive report</button>
+        </div>
+        <div class="offline-report-scroll" tabindex="0" aria-label="Scrollable archive coverage">
+          <table><thead><tr><th scope="col">Section</th><th scope="col">Saved coverage</th><th scope="col">Saved / server list</th><th scope="col">Details</th><th scope="col">Files saved / discovered</th></tr></thead><tbody></tbody></table>
+        </div>
+        <textarea data-report-text aria-label="Archive verification report; select and copy" readonly hidden></textarea>
+        <p>Counts are read locally while archiving may continue. Files are counted from saved details; unsaved details may contain more files. A caught-up snapshot does not confirm complete historical coverage.</p>
+      </section>
+      <section id="archive-sources" aria-labelledby="archive-sources-title">
+        <h2 id="archive-sources-title">Saved source responses</h2>
+        <p>Export locally saved detail and print responses for parser investigation, without fetching them again. The compressed download contains private business data and is not password-protected. Share it only for this investigation.</p>
+        <label for="source-section">Source section</label>
+        <select id="source-section" data-source-section></select>
+        <p data-source-status role="status"></p>
+        <div class="offline-report-actions">
+          <button class="isi-button" type="button" data-source-prepare>Prepare source export</button>
+          <button class="isi-button" type="button" data-source-cancel disabled>Cancel source export</button>
+          <button class="isi-button" type="button" data-source-download disabled>Download saved sources</button>
+        </div>
+      </section>
+      <p id="storage"></p><p id="retention"></p>
+      <p>Records and documents fill in gradually while the portal is available. Details may be older than the list. Items without a saved detail or file are marked explicitly.</p>
+      <p>Historical coverage and supplemental details are still being verified. Stock Card monthly history, Undelivered Stock and generated Delivery Order print sheets are excluded. Offline creation, editing and submission are deferred.</p>
+      <button id="persist" class="isi-button" type="button">Keep archive on this device</button>
+      <button id="check" class="isi-button" type="button">Check connection and sync</button>
+      </div>
+    </details>
+    </div>
+    <section id="record-view" aria-labelledby="record-title" hidden>
+      <div class="offline-heading"><div><h1 id="record-title" tabindex="-1"></h1><p id="record-number"></p></div><button id="close-record" class="isi-button" type="button">Back to list</button></div>
+      <p id="detail-time" class="isi-muted"></p>
+      <div id="record-content"></div>
+    </section>
+  </main>
+</body>
+</html>

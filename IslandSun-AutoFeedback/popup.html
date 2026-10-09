@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" class="isi-theme">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>AutoFeedback</title>
+  <link rel="icon" href="assets/family/assets/icons/feedback.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/family/css/tokens.css">
+  <link rel="stylesheet" href="assets/family/css/components.css">
+  <link rel="stylesheet" href="assets/family/css/interaction.css">
+  <link rel="stylesheet" href="assets/family/css/extension-popup.css">
+  <link rel="stylesheet" href="css/update-popup.css">
+  <script type="module" src="js/popup.js"></script>
+  <script type="module" src="assets/family/js/navigation.js"></script>
+</head>
+<body class="isi-ui" data-family-app>
+  <header class="popup-header"><img src="assets/family/assets/icons/feedback.svg" width="44" height="44" alt=""><h1>AutoFeedback</h1></header>
+  <main>
+    <section id="connection-state" aria-live="polite" data-state="checking"><span id="connection-spinner" class="isi-spinner" aria-hidden="true"></span><h2 id="state-title">Checking connection</h2><p id="state-message" class="isi-muted">Checking your company session…</p></section>
+    <button type="button" id="login-button" class="isi-button isi-button--primary" hidden>Go to Login Page</button>
+    <button type="button" id="retry-button" class="isi-button" hidden>Check again</button>
+    <form id="settings-form" class="popup-settings" novalidate hidden>
+      <label for="days">Process older than (days)<input type="number" id="days" name="days" value="180" min="1" max="36500" step="1" required></label>
+      <label for="komentar">Default Komentar<input type="text" id="komentar" name="komentar" value="Not ok" required></label>
+      <label for="saran">Default Saran<input type="text" id="saran" name="saran" value="Drop" required></label>
+      <button type="submit" id="start-button" class="isi-button isi-button--primary">Start AutoFeedback</button>
+    </form>
+    <section id="job-state" class="popup-job" hidden aria-label="Current feedback run">
+      <p id="job-message" role="status"></p>
+      <progress id="job-progress" max="100" aria-label="Feedback progress"></progress>
+      <button type="button" id="open-job" class="isi-button">View company tab</button>
+      <button type="button" id="stop-button" class="isi-button isi-button--danger">Stop AutoFeedback</button>
+      <button type="button" id="restart-button" class="isi-button" hidden>Prepare another run</button>
+    </section>
+    <p id="error-message" class="isi-notice popup-error" data-tone="error" role="alert" hidden></p>
+  </main>
+  <footer><a href="https://budhi-halim.github.io/isi-share/" class="isi-button isi-button--quiet" data-family-home target="_blank" rel="noopener">All apps</a></footer>
+</body>
+</html>

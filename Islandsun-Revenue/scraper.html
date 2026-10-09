@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" class="isi-theme">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Revenue Extractor</title>
+  <link rel="icon" href="assets/family/assets/icons/family.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/family/css/tokens.css">
+  <link rel="stylesheet" href="assets/family/css/components.css">
+  <link rel="stylesheet" href="assets/family/css/interaction.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="xlsx.full.min.js" defer></script>
+  <script type="module" src="scraper.js"></script>
+  <script type="module" src="assets/family/js/navigation.js"></script>
+</head>
+<body class="isi-ui" data-family-app>
+  <main class="app-container">
+    <section class="isi-card extractor-card" aria-labelledby="app-title">
+      <header class="extractor-header">
+        <div class="extractor-identity"><img src="assets/family/assets/icons/revenue.svg" width="48" height="48" alt=""><h1 id="app-title">Revenue Extractor</h1></div>
+        <button type="button" id="theme-toggle" class="isi-button isi-button--icon isi-theme-toggle" aria-label="Switch color scheme"></button>
+      </header>
+      <form id="extraction-form" novalidate>
+        <div class="date-group"><label for="start-month">From<input aria-describedby="validation-message" type="month" id="start-month" required></label><label for="end-month">To<input aria-describedby="validation-message" type="month" id="end-month" required></label></div>
+        <button id="start-button" class="isi-button isi-button--primary start-button" type="submit"><span id="start-spinner" class="isi-spinner" aria-hidden="true" hidden></span><span id="start-button-label">Begin Extraction</span></button>
+      </form>
+      <section class="progress-wrapper" aria-label="Extraction workflow">
+        <div class="stepper-container">
+          <div class="step-line-bg" aria-hidden="true"><div class="step-line-fill" id="step-line" data-state="idle"></div></div>
+          <ol class="stepper">
+            <li class="step" id="step-one" data-state="idle"><span class="step-circle" aria-hidden="true">1</span><span class="step-label">Delivery Records</span></li>
+            <li class="step" id="step-two" data-state="idle"><span class="step-circle" aria-hidden="true">2</span><span class="step-label">Sales Data</span></li>
+          </ol>
+        </div>
+        <div class="progress-header"><span id="percent-label" aria-hidden="true">0%</span></div>
+        <div class="progress-bar-bg" id="progress-meter" role="progressbar" aria-label="Delivery records progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-bar" id="progress-bar" data-active="false" data-complete="false"></div></div>
+        <p id="status-text" role="status">Select the months to extract.</p>
+        <p id="validation-message" class="isi-notice" data-tone="error" role="alert" hidden></p>
+      </section>
+      <details id="activity-log" class="activity-log"><summary>Activity log</summary><div id="console-area" tabindex="0" aria-label="Extraction activity" data-family-selectable></div></details>
+      <div class="workspace-actions"><button id="save-workbook" type="button" class="isi-button" hidden>Save workbook</button><a href="https://budhi-halim.github.io/isi-share/" class="isi-button isi-button--quiet" data-family-home>All apps</a></div>
+    </section>
+  </main>
+</body>
+</html>

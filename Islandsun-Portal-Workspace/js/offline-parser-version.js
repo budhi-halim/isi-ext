@@ -1,0 +1,1 @@
+export const DETAIL_PARSER_REVISION = 7;
