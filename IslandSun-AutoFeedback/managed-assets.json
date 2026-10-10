@@ -1,5 +1,5 @@
 {
-  "familyVersion": "1.3.7",
+  "familyVersion": "1.3.8",
   "files": {
     "js/shared/update-logic.js": "82ed402cfbe966196f83890c248100beafd174b1e7b91d4efff262a3b392e01d",
     "js/shared/update-popup.js": "dcc74e567b3f7dc8010040102c5324fefdf9db370b5b56fede0b1038b376f75a",
