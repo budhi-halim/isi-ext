@@ -34,6 +34,7 @@ import { createObservedSampleTable } from './offline-observed-table.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { createTextareaLimits } from './textarea-limits.js';
 import { createModalAccessibility } from './modal-accessibility.js';
+import { createActivityConsole } from './activity-console.js';
 
 // Load the module graph during parsing; DOM work still waits for the native page.
 if (document.documentElement.dataset.isiDomReady === 'pending' || document.readyState === 'loading') await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
@@ -45,6 +46,7 @@ async function start() {
   if (current !== generation) return;
   if (!enabled) { delete document.documentElement.dataset.isiPortal; document.documentElement.classList.remove('isi-theme'); document.documentElement.dataset.isiBoot = 'off'; return; }
   if (applyDefaultFilterDate()) return;
+  const activity = createActivityConsole();
   document.documentElement.dataset.isiPortal = 'enabled';
   document.documentElement.classList.add('isi-theme');
   const journal = createPresentationJournal();
@@ -116,6 +118,7 @@ async function start() {
   }
   document.addEventListener('islandsun-table-draw', enhance);
   teardown = (preservePresentation = false) => {
+    activity.destroy();
     setOfflineAccount(null);
     observedTable.destroy();
     chrome.storage.onChanged.removeListener(accountChanged);

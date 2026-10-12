@@ -125,6 +125,11 @@ export function startReadGate({onEvent = () => {}} = {}) {
     job.close = () => { remove(); port.disconnect(); };
     port.onDisconnect.addListener(remove);
     port.onMessage.addListener(message => {
+      if (message?.type === 'status' && job.queued && !job.closed) {
+        try { port.postMessage({waiting:archiveWait()}); }
+        catch { /* A closed reader no longer needs a queue explanation. */ }
+        return;
+      }
       if (message?.type === 'finished') {
         if (current === job && !job.closed && !job.finished && typeof message.failed === 'boolean') {
           job.finished = true; job.failed = message.failed; recordResult(message.failed);
@@ -148,7 +153,7 @@ export function startReadGate({onEvent = () => {}} = {}) {
 
   function pause(job) {
     if (job.cancel) { job.cancel(); return; }
-    try { job.port.postMessage({ paused: true }); }
+    try { job.port.postMessage({ paused: true, reason: portalOffline ? 'offline' : 'editor' }); }
     catch { /* A disconnected reader still needs its queue slot released. */ }
     finally { job.close(); }
   }

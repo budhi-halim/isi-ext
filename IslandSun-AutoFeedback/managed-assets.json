@@ -1,9 +1,9 @@
 {
   "familyVersion": "1.3.9",
   "files": {
-    "js/shared/update-logic.js": "82ed402cfbe966196f83890c248100beafd174b1e7b91d4efff262a3b392e01d",
+    "js/shared/update-logic.js": "41550e5de712824920400fc6d92000cdf3b3e8c1ba7fe0b1d40e06b262984434",
     "js/shared/update-popup.js": "dcc74e567b3f7dc8010040102c5324fefdf9db370b5b56fede0b1038b376f75a",
-    "js/shared/update-service.js": "49a2c571f2681d0f6d4e3926d7f86dcddb7b37a907a7c44416e763095e279096",
+    "js/shared/update-service.js": "9d181dddda4f58b2536decb0ceaecc4b012715ca6464dd5444b1a036bfb4ebd2",
     "css/update-popup.css": "f0956bf1aac9246f388136789d590695381fa2f0b52e817d92da119d1e21c484"
   }
 }

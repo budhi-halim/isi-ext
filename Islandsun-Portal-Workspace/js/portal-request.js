@@ -1,7 +1,8 @@
 import { portalUrl } from './shared/document-names.js';
 import { isTirSourceUrl } from './tir-source-logic.js';
 import { recordConnectionDiagnostic } from './connection-diagnostics.js';
-import { logFetch, requestNumber as knownRequestNumber } from './request-log.js';
+import { logFetch, logFetchResult, requestNumber as knownRequestNumber } from './request-log.js';
+import { createActivityLog } from './activity-log.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { capturePortalFetch } from './debug-capture-client.js';
 
@@ -27,18 +28,19 @@ function requestKind(url) {
 let lifecycle = new AbortController();
 let navigating = false;
 let listening = false;
+const activity = createActivityLog('Live reads');
 
-function suspend() { lifecycle.abort(new DOMException('Portal reads paused', 'AbortError')); }
+function suspend(reason = 'navigation') { activity.pause(reason); lifecycle.abort(new DOMException('Portal reads paused', 'AbortError')); }
 function resume() {
-  if (!document.hidden && !navigating && lifecycle.signal.aborted) lifecycle = new AbortController();
+  if (!document.hidden && !navigating && lifecycle.signal.aborted) { lifecycle = new AbortController(); activity.resume(); }
 }
 function listen() {
   if (listening) return;
   listening = true;
   window.addEventListener('beforeunload', () => { navigating = true; suspend(); });
-  window.addEventListener('pagehide', suspend);
+  window.addEventListener('pagehide', () => suspend());
   window.addEventListener('pageshow', () => { navigating = false; resume(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) suspend(); else resume(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) suspend('hidden'); else resume(); });
   // A cancelled navigation leaves the same document active; real interaction resumes its reads.
   for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, event => {
     if (event.isTrusted && navigating) { navigating = false; resume(); }
@@ -51,9 +53,17 @@ function acquireRead(signal, priority, editorLookup) {
     const port = chrome.runtime.connect({ name: 'islandsun-read-gate' });
     let granted = false, released = false, yielding = false;
     const disconnected = new AbortController();
-    const timeout = setTimeout(() => stop(new Error('The portal is busy. Please try again shortly.')), 60000);
+    const queuedAt = Date.now();
+    const waiting = setTimeout(() => {
+      try { port.postMessage({type:'status'}); }
+      catch { /* Disconnection owns cleanup and the error result. */ }
+    }, 4000);
+    const timeout = setTimeout(() => {
+      activity.note('queue-timeout', 'Queue wait reached 60s; this attempt stopped. Background checks retry automatically.');
+      stop(new Error('The portal is busy. Please try again shortly.'));
+    }, 60000);
     function stop(error) {
-      released = true; clearTimeout(timeout); signal?.removeEventListener('abort', abort); port.disconnect();
+      released = true; clearTimeout(timeout); clearTimeout(waiting); signal?.removeEventListener('abort', abort); port.disconnect();
       if (!granted) reject(error);
     }
     // Cancelling a consumer removes a waiter, but an active HTTP response retains
@@ -61,7 +71,7 @@ function acquireRead(signal, priority, editorLookup) {
     const abort = () => { if (!granted) stop(signal.reason); };
     signal?.addEventListener('abort', abort, { once: true });
     port.onDisconnect.addListener(() => {
-      clearTimeout(timeout); signal?.removeEventListener('abort', abort);
+      clearTimeout(timeout); clearTimeout(waiting); signal?.removeEventListener('abort', abort);
       if (!released) {
         const error = new Error('The portal connection was interrupted. Please try again.');
         disconnected.abort(error);
@@ -69,17 +79,25 @@ function acquireRead(signal, priority, editorLookup) {
       }
     });
     port.onMessage.addListener(message => {
-      if (message.yield) { yielding = true; return; }
+      if (message.waiting) {
+        if (!granted && !released) activity.pause(message.waiting.reason, message.waiting.until);
+        return;
+      }
+      if (message.yield) { activity.note('yield', 'Yielding to visible table activity after the current response finishes.'); yielding = true; return; }
       if (message.cooldownUntil) {
+        activity.pause('recovery', message.cooldownUntil);
         const error = new Error('The portal connection needs time to recover. Cached products remain available; live checks will retry automatically.');
         error.code = 'PORTAL_READ_COOLDOWN'; stop(error); return;
       }
       if (message.paused) {
-        const error = new Error('Live product lookups are paused while a request form is open. Return to a list to resume.');
-        error.code = 'PORTAL_EDITOR_OPEN'; disconnected.abort(error); stop(error); return;
+        const offline = message.reason === 'offline';
+        activity.pause(offline ? 'offline' : 'editor');
+        const error = new Error(offline ? 'The portal is unavailable. Live lookups will resume after the connection recovers.' : 'Live product lookups are paused while a request form is open. Return to a list to resume.');
+        error.code = offline ? 'PORTAL_OFFLINE' : 'PORTAL_EDITOR_OPEN'; disconnected.abort(error); stop(error); return;
       }
       if (!message.granted || released) return;
-      granted = true; clearTimeout(timeout);
+      granted = true; clearTimeout(timeout); clearTimeout(waiting); activity.resume();
+      if (Date.now() - queuedAt >= 4000) activity.note('queue-granted', `Queue granted after ${((Date.now() - queuedAt) / 1000).toFixed(1)}s.`);
       resolve({ release: failed => {
         try { if (!released) port.postMessage({type:'finished', failed}); }
         catch { /* A disconnected permit already released its lane. */ }
@@ -95,7 +113,7 @@ function acquireRead(signal, priority, editorLookup) {
 /** Keep a record's dependent reads together so another record cannot replace portal session state. */
 export async function withPortalRead(task, { signal, priority = false, editorLookup } = {}) {
   listen();
-  if (document.hidden) suspend();
+  if (document.hidden) suspend('hidden');
   signal = signal ? AbortSignal.any([signal, lifecycle.signal]) : lifecycle.signal;
   if (editorLookup && !isTirSourceUrl(editorLookup)) throw new Error('This request link is unavailable.');
   const permit = await acquireRead(signal, priority, editorLookup);
@@ -164,6 +182,7 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
       throw error;
     } finally {
       recordConnectionDiagnostic({kind, outcome, status, durationMs:performance.now() - started});
+      logFetchResult(url, kind, {number:requestNumber, outcome, status, durationMs:performance.now() - started});
     }
   }
   try { return await task(read); }

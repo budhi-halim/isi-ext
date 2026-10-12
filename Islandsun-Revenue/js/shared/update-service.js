@@ -60,6 +60,9 @@ export function startUpdateService({ key, discoverFamily = false, api = chrome, 
     checking = (async () => {
       await refreshInventory();
       const due = await transaction(state => {
+        // Bound persisted deadlines when a release shortens the check interval.
+        const lastAttempt = Math.max(Number(state.attemptedAt) || 0, Number(state.checkedAt) || 0);
+        state.nextCheck = Math.min(Number(state.nextCheck) || 0, lastAttempt + CHECK_INTERVAL);
         if (state.nextCheck > now()) return false;
         state.attemptedAt = now(); state.nextCheck = now() + 60000;
         return true;
@@ -80,7 +83,10 @@ export function startUpdateService({ key, discoverFamily = false, api = chrome, 
           state.nextCheck = now() + Math.min(CHECK_INTERVAL, 30 * 60000 * 2 ** (state.failures - 1));
         });
       }
-    })().finally(() => { checking = null; });
+    })().finally(async () => {
+      try { await scheduleNextCheck(); }
+      finally { checking = null; }
+    });
     return checking;
   }
   const safelyCheck = () => { void check().catch(() => {}); };
@@ -120,17 +126,22 @@ export function startUpdateService({ key, discoverFamily = false, api = chrome, 
     return true;
   });
   api.alarms.onAlarm.addListener(alarm => { if (alarm.name === ALARM) safelyCheck(); });
-  async function schedule() {
-    if (!await api.alarms.get(ALARM)) await api.alarms.create(ALARM, { periodInMinutes: 30 });
-    safelyCheck();
+  async function scheduleNextCheck() {
+    const state = (await api.storage.local.get(UPDATE_KEY))[UPDATE_KEY];
+    const when = Math.max(now() + 1000, Number(state?.nextCheck) || now() + CHECK_INTERVAL);
+    const periodInMinutes = CHECK_INTERVAL / 60000;
+    const alarm = await api.alarms.get(ALARM);
+    if (alarm?.periodInMinutes !== periodInMinutes || Math.abs((alarm.scheduledTime ?? alarm.when ?? 0) - when) > 1000) {
+      await api.alarms.create(ALARM, { when, periodInMinutes });
+    }
   }
-  api.runtime.onInstalled.addListener(() => { void schedule().catch(() => {}); });
-  api.runtime.onStartup.addListener(() => { void schedule().catch(() => {}); });
+  api.runtime.onInstalled.addListener(safelyCheck);
+  api.runtime.onStartup.addListener(safelyCheck);
   if (discoverFamily) {
     const changed = () => { void refreshInventory().catch(() => {}); safelyCheck(); };
     api.permissions.onAdded.addListener(changed); api.permissions.onRemoved.addListener(changed);
     for (const event of ['onInstalled', 'onUninstalled', 'onEnabled', 'onDisabled']) api.management?.[event]?.addListener(changed);
   }
-  void schedule().catch(() => {});
+  safelyCheck();
   return { check, refreshInventory };
 }
