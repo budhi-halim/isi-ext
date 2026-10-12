@@ -32,7 +32,7 @@ const activity = createActivityLog('Live reads');
 
 function suspend(reason = 'navigation') { activity.pause(reason); lifecycle.abort(new DOMException('Portal reads paused', 'AbortError')); }
 function resume() {
-  if (!document.hidden && !navigating && lifecycle.signal.aborted) { lifecycle = new AbortController(); activity.resume(); }
+  if (!navigating && lifecycle.signal.aborted) { lifecycle = new AbortController(); activity.resume(); }
 }
 function listen() {
   if (listening) return;
@@ -40,7 +40,6 @@ function listen() {
   window.addEventListener('beforeunload', () => { navigating = true; suspend(); });
   window.addEventListener('pagehide', () => suspend());
   window.addEventListener('pageshow', () => { navigating = false; resume(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) suspend('hidden'); else resume(); });
   // A cancelled navigation leaves the same document active; real interaction resumes its reads.
   for (const type of ['pointerdown', 'keydown']) document.addEventListener(type, event => {
     if (event.isTrusted && navigating) { navigating = false; resume(); }
@@ -113,7 +112,6 @@ function acquireRead(signal, priority, editorLookup) {
 /** Keep a record's dependent reads together so another record cannot replace portal session state. */
 export async function withPortalRead(task, { signal, priority = false, editorLookup } = {}) {
   listen();
-  if (document.hidden) suspend('hidden');
   signal = signal ? AbortSignal.any([signal, lifecycle.signal]) : lifecycle.signal;
   if (editorLookup && !isTirSourceUrl(editorLookup)) throw new Error('This request link is unavailable.');
   const permit = await acquireRead(signal, priority, editorLookup);

@@ -3,7 +3,7 @@ import { acquireLocalLock } from './local-lock.js';
 import { monitorDetailsEligible } from './submission-logic.js';
 import { createActivityLog } from './activity-log.js';
 
-/** A single visible portal tab owns polling. Work is read-only, serial, and backs off on failure. */
+/** One portal tab owns polling regardless of visibility; reads remain serial and retry on failure. */
 export function createNotificationMonitor(store, repository, notices, accountName, {
   readIndex = readMonitorIndex, readRecord = readMonitoredRecord, acquireLock = acquireLocalLock,
   activity = createActivityLog('Notification checks'),
@@ -13,9 +13,9 @@ export function createNotificationMonitor(store, repository, notices, accountNam
   let indexedAt = 0, retry = 15000, idleSince = 0;
   const relinquish = () => { releaseLeadership?.(); releaseLeadership = null; };
   const pause = () => { clearTimeout(timer); controller?.abort(); relinquish(); };
-  const schedule = delay => { clearTimeout(timer); if (!disposed && !document.hidden) timer = setTimeout(tick, delay); };
+  const schedule = delay => { clearTimeout(timer); if (!disposed) timer = setTimeout(tick, delay); };
   async function tick() {
-    if (disposed || document.hidden) return;
+    if (disposed) return;
     if (busy) { schedule(1000); return; }
     busy = true;
     controller = new AbortController();
@@ -24,7 +24,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
     try {
       if (!releaseLeadership) {
         const release = await acquireLock(`${store.key}:monitor`, { wait: false, onLost: () => { releaseLeadership = null; controller?.abort(); schedule(5000); } });
-        if (disposed || document.hidden || signal.aborted) { release?.(); return; }
+        if (disposed || signal.aborted) { release?.(); return; }
         releaseLeadership = release;
       }
       if (!releaseLeadership) { activity.pause('other-tab'); schedule(5000); return; }
@@ -81,9 +81,10 @@ export function createNotificationMonitor(store, repository, notices, accountNam
           schedule(60000);
         } else { activity.pause('retry', Date.now() + retry); schedule(retry); retry = Math.min(retry * 2, 120000); }
       }
-    } finally { busy = false; controller = null; if (interruption.aborted && !disposed && !document.hidden) schedule(1000); }
+    } finally { busy = false; controller = null; if (interruption.aborted && !disposed) schedule(1000); }
   }
-  const visibility = () => { if (document.hidden) { activity.pause('hidden'); pause(); } else schedule(250); };
-  document.addEventListener('visibilitychange', visibility); schedule(1000);
+  const visibility = () => activity.note(document.hidden ? 'background' : 'foreground',
+    `Portal tab is ${document.hidden ? 'in the background' : 'visible'}; visibility does not pause checks.`);
+  document.addEventListener('visibilitychange', visibility); visibility(); schedule(1000);
   return { destroy() { disposed = true; pause(); activity.destroy(); document.removeEventListener('visibilitychange', visibility); seen.clear(); } };
 }

@@ -105,11 +105,10 @@ export function createProductPreviewUI({notify, repository, resolveRecord:record
     const records = [];
     for (const row of document.querySelectorAll('.dataTables_wrapper #mytable tbody tr')) {
       const data = record(row);
-      if (data && row.getClientRects().length && !document.hidden) records.push(data.url);
+      if (data && row.getClientRects().length) records.push(data.url);
     }
-    prefetch?.update(document.hidden ? [] : records.concat(sources?.records() || []));
+    prefetch?.update(records.concat(sources?.records() || []));
   }
-  document.addEventListener('visibilitychange', enhance, { signal });
   document.addEventListener('scroll', event => { if (event.target.id === 'select2-setsrf-results') enhance(); }, { signal, capture: true, passive: true });
   return { enhance, dismiss() { tracking.dismiss(); dialog?.close(); }, destroy() { prefetch?.destroy(); sources?.destroy(); reads.get(hover)?.abort(); hover?.remove(); hover = null; tracking.destroy(); dialog?.close(); listeners.abort(); repository.destroy(); for (const timer of copyTimers.values()) clearTimeout(timer); copyTimers.clear(); } };
 }

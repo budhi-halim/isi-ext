@@ -1,6 +1,7 @@
 import { emptyNotificationState, observeRecord, dismissNotification } from './notification-logic.js';
 import { acquireLocalLock } from './local-lock.js';
 import { registerSubmission, observeSubmissionStatuses, submissionRecord, SUBMISSION_INTENT_LIFETIME } from './submission-logic.js';
+import { pruneNotificationState } from './notification-relevance.js';
 
 /** A same-origin lock serializes localStorage updates across portal tabs. */
 export function createNotificationStore(account, { storage = localStorage, locks = navigator.locks, onError = () => {} } = {}) {
@@ -33,7 +34,7 @@ export function createNotificationStore(account, { storage = localStorage, locks
       for (const name of pending) {
         try { previous = registerSubmission(previous, JSON.parse(storage.getItem(name))); } catch { /* A malformed outbox entry cannot become a submission. */ }
       }
-      const next = transform(previous), after = JSON.stringify(next);
+      const next = pruneNotificationState(transform(previous)), after = JSON.stringify(next);
       if (after !== before) storage.setItem(key, after);
       for (const name of pending) storage.removeItem(name);
       if (after !== before) publish();
@@ -50,6 +51,10 @@ export function createNotificationStore(account, { storage = localStorage, locks
     else if (event.key?.startsWith(outboxPrefix) && event.newValue) update(state => state).catch(() => {});
   };
   window.addEventListener('storage', changed);
+  try {
+    const saved = read(), count = Object.keys(saved.notices).length;
+    if (Object.keys(pruneNotificationState(saved).notices).length !== count) void update(state => state).catch(() => {});
+  } catch (error) { onError(error); }
   return {
     key, read,
     registerSubmission(record) {

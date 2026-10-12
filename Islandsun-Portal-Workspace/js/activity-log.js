@@ -1,5 +1,4 @@
 const PAUSE_REASONS = Object.freeze({
-  hidden: 'this portal tab is in the background; offline saving can continue',
   navigation: 'a portal page is loading',
   editor: 'a request editor is open; its product cart is protected',
   offline: 'the portal is unreachable; only connection recovery checks continue',
@@ -9,7 +8,7 @@ const PAUSE_REASONS = Object.freeze({
   reading: 'another portal request is still running',
   queued: 'higher-priority portal requests are queued',
   startup: 'browser activity checks are starting',
-  'other-tab': 'another visible portal tab owns notification checks',
+  'other-tab': 'another portal tab owns notification checks, including in the background',
   'signed-out': 'sign-in is required',
   'unlock-required': 'the saved account needs to be unlocked',
   disabled: 'saving is disabled in settings',

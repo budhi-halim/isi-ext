@@ -1,5 +1,6 @@
 import { PORTAL_ORIGIN } from './shared/document-names.js';
 import { requestDetailUrl, tirDetailUrl } from './logic.js';
+import { discardRecordNotices, pruneNotificationState } from './notification-relevance.js';
 
 export const SUBMISSION_INTENT_LIFETIME = 7 * 86400000;
 const RECORD_ID = /^[1-9]\d{0,11}$/;
@@ -92,18 +93,23 @@ export function observeSubmissionStatuses(previous, records, { now = Date.now(),
       continue;
     }
     if (stage === 'active') {
+      discardRecordNotices(state, key, ['rollback', 'rejected', 'cancelled']);
       state.submissions[key] = { ...record, token: known?.token || `observed-${observedAt}`, created: known?.created ?? observedAt, confirmed: true, observed: observedAt };
     } else if (stage === 'complete') {
+      discardRecordNotices(state, key, ['rollback', 'rejected', 'cancelled']);
       delete state.submissions[key];
     } else {
+      discardRecordNotices(state, key, ['overdue', 'ready', 'complete']);
       delete state.jobs[key];
-      if (!known?.confirmed) continue;
-      const id = `${key}:submission:${known.token}:${stage}`;
+      const previousNotice = Object.values(state.notices).find(notice => notice.key === key && ['rollback', 'rejected', 'cancelled'].includes(notice.type));
+      if (!known?.confirmed && (!previousNotice || previousNotice.type === stage)) continue;
+      discardRecordNotices(state, key, ['rollback', 'rejected', 'cancelled']);
+      const id = `${key}:submission:${known?.token || `observed-${observedAt}`}:${stage}`;
       const message = stage === 'rollback' ? `${record.number}: returned to ${record.kind === 'tir' ? 'Pending' : 'Draft'} after submission to Product Marketing.`
         : `${record.number}: ${record.kind === 'tir' ? 'TIR rejected' : 'sample request cancelled'}.`;
       state.notices[id] ??= { id, key, type: stage, message, created: now, url: record.url };
       delete state.submissions[key];
     }
   }
-  return state;
+  return pruneNotificationState(state);
 }

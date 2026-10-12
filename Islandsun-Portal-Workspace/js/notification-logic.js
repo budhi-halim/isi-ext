@@ -1,4 +1,5 @@
 import { monitorDetailsEligible } from './submission-logic.js';
+import { pruneNotificationState } from './notification-relevance.js';
 
 const DAY = 86400000;
 const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
@@ -34,7 +35,7 @@ export function observeRecord(previous, record, { now = Date.now(), today = new 
       const muteKey = `${key}:${documentKey}`;
       const tracked = known?.pending[documentKey];
       if (document.ready) {
-        if (tracked) notify(`${key}:${documentKey}:ready`, `${record.number}: ${document.label} is ready.`, { type: 'ready' });
+        if (tracked) notify(`${key}:${documentKey}:ready`, `${record.number}: ${document.label} is ready.`, { type: 'ready', documentId: documentKey });
         continue;
       }
       const lastWeek = tracked?.lastWeek || 0;
@@ -61,7 +62,7 @@ export function observeRecord(previous, record, { now = Date.now(), today = new 
   } else return state;
   if (Object.keys(pending).length) state.jobs[key] = { pending, number: record.number, date: record.date, url: record.url, kind: record.kind, id: record.id };
   else delete state.jobs[key];
-  return state;
+  return pruneNotificationState(state);
 }
 
 /** Dismissal deletes both views; muting retains only a suppression key, never finished job history. */
