@@ -1,4 +1,5 @@
 import { reveal } from './motion.js';
+import { applyDefaultFilterLinks } from './filter-dates.js';
 
 function columnType(text) {
   if (/^\/islandsun\/(?:index\.php\/)?newdo\/?$/i.test(location.pathname)) {
@@ -45,6 +46,7 @@ export function createNavigation() {
     if (row && event.target === row && ['Enter',' '].includes(event.key)) { event.preventDefault(); row.querySelector('[data-isi-detail]')?.click(); }
   }, { signal });
   function enhance() {
+    applyDefaultFilterLinks();
     if (/^\/islandsun\/(?:index\.php\/)?newdo\/?$/i.test(location.pathname)) {
       for (const button of document.querySelectorAll('.content button')) {
         if (/^(Get product data|Get Produk Data)$/i.test(button.textContent.trim())) {

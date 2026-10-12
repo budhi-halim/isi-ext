@@ -15,12 +15,18 @@ export function splitRequestedProduct(value) {
 }
 
 /** Issued entries win exact name/code matches; unmatched requests remain visibly provisional. */
-export function mergeProducts(requested, issued) {
+export function mergeProducts(requested, issued, { includeRequested = true } = {}) {
   const provided = issued.map(item => ({ ...item, requested: false }));
+  if (!includeRequested) return provided;
   const remaining = requested.filter(item => !issued.some(actual =>
     (item.code && actual.code && identity(item.code) === identity(actual.code)) ||
     ((!item.code || !actual.code) && identity(item.name) && identity(item.name) === identity(actual.name)) ||
     (item.code && identity(`${item.name} ${item.code}`) === identity(actual.name)) ||
     (actual.code && identity(item.name) === identity(`${actual.name} ${actual.code}`))));
   return [...provided, ...remaining.map(item => ({ ...item, requested: true }))];
+}
+
+/** Only General requests identify existing products still owed to the customer. */
+export function hasRequestedProducts(type) {
+  return Number(type) === 1;
 }

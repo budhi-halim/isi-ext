@@ -1,5 +1,5 @@
 import { PORTAL_ORIGIN, portalUrl } from './shared/document-names.js';
-import { mergeProducts, splitIssuedProduct, splitRequestedProduct } from './product-logic.js';
+import { hasRequestedProducts, mergeProducts, splitIssuedProduct, splitRequestedProduct } from './product-logic.js';
 import { readPortalText, withPortalRead } from './portal-request.js';
 import { requestNumber } from './request-log.js';
 import { rememberOfflineDetail } from './offline-observer.js';
@@ -60,7 +60,7 @@ async function readSampleRecord(url, signal, { readText, priority }) {
   const result = (archive = true) => {
     if (archive) rememberOfflineDetail(url,root,detailSources.get(root));
     const issued = issuedProducts(root, Number.isInteger(type) && type > 1);
-    return { products: mergeProducts(requested, issued), requestedCount: requestedComplete ? requested.length : null, providedCount: issued.length };
+    return { products: mergeProducts(requested, issued, { includeRequested: hasRequestedProducts(type) }), requestedCount: requestedComplete ? requested.length : null, providedCount: issued.length };
   };
   const table = root.querySelector('#productRequest #tableSP');
   if (!/^\d+$/.test(id || '') || !table || ![1, 4].includes(type)) return result();

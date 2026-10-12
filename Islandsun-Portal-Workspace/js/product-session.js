@@ -1,4 +1,4 @@
-import { mergeProducts, splitIssuedProduct, splitRequestedProduct } from './product-logic.js';
+import { hasRequestedProducts, mergeProducts, splitIssuedProduct, splitRequestedProduct } from './product-logic.js';
 
 /** Session storage is accessed by the trusted worker, never exposed to page scripts. */
 export function productSession(account) {
@@ -17,6 +17,7 @@ export function productSession(account) {
       });
       return {...record,value:{...record.value,products:mergeProducts(
         products.filter(product=>product.requested),products.filter(product=>!product.requested),
+        { includeRequested: hasRequestedProducts(url.searchParams.get('srtype')) },
       )}};
     }),
     save: record => request('product-cache-write', record),

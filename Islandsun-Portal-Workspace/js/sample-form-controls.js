@@ -1,10 +1,12 @@
 import { SAMPLE_APPLICATION_GROUPS } from './sample-application-groups.js';
 import { presentSampleQuantities } from './sample-quantity.js';
+import { createSampleProductEdit } from './sample-product-edit.js';
 
 const QUANTITY_UNITS = 'select[name="srd_fo_uom"],select[name="srd_avg_uom"],select[name="srd_max_uom"]';
 
 export function createSampleFormControls() {
   const units = new Map();
+  const productEdit = createSampleProductEdit();
 
   function arrange() {
     presentSampleQuantities(document.body);
@@ -143,6 +145,7 @@ export function createSampleFormControls() {
     arrange,
     enhanceUnits,
     destroy() {
+      productEdit.destroy();
       for (const [select, entry] of units) {
         select.removeEventListener('change', entry.change);
         const value = select.value;
