@@ -1,7 +1,10 @@
+import { PREVIEW_FRESH_MS, recordKind, readPriority } from './fetch-policy.js';
+import { diagnosticLog } from './diagnostic-log.js';
+
 /** One bounded request queue serves foreground previews, page prefetch, and monitoring. */
-export function createProductCache(load, { maxEntries = 300, maxBytes = 8 * 1024 * 1024, maxPending = 300, lifetime = 60000, concurrency = 2, now = Date.now, persistence = null } = {}) {
+export function createProductCache(load, { maxEntries = 90, maxBytes = 8 * 1024 * 1024, maxPending = 100, lifetime = PREVIEW_FRESH_MS, concurrency = 1, now = Date.now, persistence = null, pageSize = 10 } = {}) {
   const entries = new Map(), failures = new Map(), queued = new Map(), queue = [], controllers = new Set();
-  let active = 0, cachedBytes = 0, disposed = false;
+  let active = 0, urgentActive = 0, cachedBytes = 0, disposed = false, generation = 0;
   let storageWarning = false;
   function storageFailed() {
     if (!storageWarning) console.warn('[Islandsun Portal Workspace] Product cache is limited to this page because session storage is unavailable.');
@@ -19,36 +22,60 @@ export function createProductCache(load, { maxEntries = 300, maxBytes = 8 * 1024
     // Large results remain usable by their caller without occupying the reusable cache.
     if (bytes > maxBytes) return;
     entries.set(url, { value, bytes, fetched, expires: fetched + lifetime }); cachedBytes += bytes;
+    const kind = recordKind(url);
+    const sameKind = [...entries.keys()].filter(key => recordKind(key) === kind);
+    while (sameKind.length > pageSize * 3) forget(sameKind.shift());
     while (entries.size > maxEntries || cachedBytes > maxBytes) forget(entries.keys().next().value);
   }
   function pump() {
-    while (!disposed && active < concurrency && queue.length) {
-      const job = queue.shift(); active++;
+    while (!disposed && queue.length) {
+      // Reserve one dispatch slot for visible work even when a background reader is held by the worker.
+      const index = queue.findIndex(job => ['hover','visible'].includes(job.purpose) ? urgentActive < 1 : active - urgentActive < concurrency);
+      if (index < 0) break;
+      const job = queue.splice(index,1)[0], urgent = ['hover','visible'].includes(job.purpose), startedGeneration = generation;
+      active++; if (urgent) urgentActive++;
       const controller = new AbortController(); controllers.add(controller);
       job.controller = controller;
-      Promise.resolve().then(() => load(job.url, controller.signal, { priority: job.priority })).then(value => {
-        if (disposed || controller.signal.aborted) throw new DOMException('Stopped', 'AbortError');
-        failures.delete(job.url); remember(job.url, value);
-        if (persistence) persistence.save({ url: job.url, value, fetched: now() }).catch(storageFailed);
+      Promise.resolve().then(async () => {
+        const release = await persistence?.lock?.(job.url);
+        try {
+          controller.signal.throwIfAborted();
+          const shared = await persistence?.get?.(job.url);
+          if (!job.fresh && shared?.fetched + job.maxAge > now()) {
+            job.fetched = shared.fetched;
+            diagnosticLog('cache-hit',{url:job.url,shared:true,purpose:job.purpose});
+            return shared.value;
+          }
+          const value = await load(job.url, controller.signal, { priority: job.priority, purpose:job.purpose });
+          if (persistence && !controller.signal.aborted && generation === startedGeneration) await persistence.save({url:job.url,value,fetched:now(),pageSize,startedAt:job.startedAt}).catch(storageFailed);
+          return value;
+        } finally { release?.(); }
+      }).then(value => {
+        if (disposed || controller.signal.aborted || generation !== startedGeneration) throw new DOMException('Stopped', 'AbortError');
+        failures.delete(job.url); remember(job.url, value, job.fetched || now());
         job.resolve(value);
       }).catch(error => {
         if (error.name !== 'AbortError') failures.set(job.url, { error, expires: now() + 10000 });
         while (failures.size > maxEntries) failures.delete(failures.keys().next().value);
         job.reject(error);
-      }).finally(() => { job.settled = true; active--; if (queued.get(job.url) === job) queued.delete(job.url); controllers.delete(controller); pump(); });
+      }).finally(() => { job.settled = true; active--; if (urgent) urgentActive--; if (queued.get(job.url) === job) queued.delete(job.url); controllers.delete(controller); pump(); });
     }
   }
-  function request(url, { priority = false, fresh = false, maxAge = lifetime } = {}) {
+  function request(url, { priority = false, purpose = priority ? 'hover' : 'notification', fresh = false, maxAge = lifetime } = {}) {
     if (disposed) return { promise: Promise.reject(new DOMException('Disposed', 'AbortError')) };
     const cached = entries.get(url);
-    if (!fresh && cached?.expires > now() && cached.fetched + maxAge > now()) return { promise: Promise.resolve(cached.value) };
+    if (!fresh && cached?.expires > now() && cached.fetched + maxAge > now()) {
+      diagnosticLog('cache-hit',{url,purpose,ageMs:now()-cached.fetched});
+      return { promise: Promise.resolve(cached.value) };
+    }
     const failure = failures.get(url);
     if (failure?.expires > now()) return { promise: Promise.reject(failure.error) };
     const existing = queued.get(url);
     if (existing) {
+      diagnosticLog('cache-joined',{url,purpose});
       if (priority) existing.priority = true;
-      const index = queue.indexOf(existing);
-      if (priority && index > 0) { queue.splice(index, 1); queue.unshift(existing); }
+      if (readPriority(purpose,recordKind(url)) > readPriority(existing.purpose,recordKind(url))) existing.purpose = purpose;
+      queue.sort((a,b) => readPriority(b.purpose,recordKind(b.url)) - readPriority(a.purpose,recordKind(a.url))); pump();
       return existing;
     }
     if (queued.size >= maxPending) {
@@ -57,9 +84,10 @@ export function createProductCache(load, { maxEntries = 300, maxBytes = 8 * 1024
       queue.splice(queue.indexOf(victim), 1); queued.delete(victim.url); victim.settled = true;
       victim.reject(new DOMException('Prefetch superseded by an active request', 'AbortError'));
     }
-    const job = { url, priority, consumers: new Set(), retained: false, settled: false };
+    const job = { url, priority, purpose, fresh, maxAge, startedAt:now(), consumers: new Set(), retained: false, settled: false };
     job.promise = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
-    queued.set(url, job); priority ? queue.unshift(job) : queue.push(job); pump();
+    queued.set(url, job); queue.push(job);
+    queue.sort((a,b) => readPriority(b.purpose,recordKind(b.url)) - readPriority(a.purpose,recordKind(a.url))); pump();
     return job;
   }
   function getReady(url, { signal, ...options } = {}) {
@@ -90,10 +118,23 @@ export function createProductCache(load, { maxEntries = 300, maxBytes = 8 * 1024
       job.promise.then(resolve, reject).finally(release);
     });
   }
-  function get(url, options) { return ready.then(() => getReady(url, options)); }
+  function get(url, options = {}) {
+    const purpose = options.purpose || (options.priority ? 'hover' : 'notification');
+    if (['hover','visible'].includes(purpose)) {
+      try { globalThis.chrome?.runtime?.sendMessage({type:'portal-read-promote',url,purpose})?.catch(() => {}); }
+      catch { /* Navigation may already have disconnected this consumer. */ }
+    }
+    return ready.then(() => getReady(url, options));
+  }
   function peek(url, maxStale = 0) {
     const entry = entries.get(url);
     return !disposed && entry?.expires + maxStale > now() ? entry.value : undefined;
   }
-  return { get, peek, destroy() { disposed = true; for (const controller of controllers) controller.abort(); for (const job of queue.splice(0)) job.reject(new DOMException('Disposed', 'AbortError')); queued.clear(); entries.clear(); cachedBytes = 0; failures.clear(); } };
+  function clear() {
+    generation++;
+    for (const controller of controllers) controller.abort();
+    for (const job of queue.splice(0)) job.reject(new DOMException('Cache cleared','AbortError'));
+    queued.clear(); entries.clear(); cachedBytes = 0; failures.clear();
+  }
+  return { get, peek, clear, setPageSize(value) { if (Number.isInteger(value) && value >= 5 && value <= 100) pageSize = value; }, destroy() { disposed = true; clear(); } };
 }

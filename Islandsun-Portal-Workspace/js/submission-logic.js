@@ -107,7 +107,7 @@ export function observeSubmissionStatuses(previous, records, { now = Date.now(),
       const id = `${key}:submission:${known?.token || `observed-${observedAt}`}:${stage}`;
       const message = stage === 'rollback' ? `${record.number}: returned to ${record.kind === 'tir' ? 'Pending' : 'Draft'} after submission to Product Marketing.`
         : `${record.number}: ${record.kind === 'tir' ? 'TIR rejected' : 'sample request cancelled'}.`;
-      state.notices[id] ??= { id, key, type: stage, message, created: now, url: record.url };
+      state.notices[id] ??= { id, key, type: stage, message, created: now, url: record.url, customer:record.customer || '' };
       delete state.submissions[key];
     }
   }

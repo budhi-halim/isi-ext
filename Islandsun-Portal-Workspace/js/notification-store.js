@@ -1,7 +1,8 @@
-import { emptyNotificationState, observeRecord, dismissNotification } from './notification-logic.js';
+import { emptyNotificationState, observeRecord, dismissNotification, acknowledgeNotices } from './notification-logic.js';
 import { acquireLocalLock } from './local-lock.js';
 import { registerSubmission, observeSubmissionStatuses, submissionRecord, SUBMISSION_INTENT_LIFETIME } from './submission-logic.js';
 import { pruneNotificationState } from './notification-relevance.js';
+import { diagnosticLog } from './diagnostic-log.js';
 
 /** A same-origin lock serializes localStorage updates across portal tabs. */
 export function createNotificationStore(account, { storage = localStorage, locks = navigator.locks, onError = () => {} } = {}) {
@@ -35,6 +36,8 @@ export function createNotificationStore(account, { storage = localStorage, locks
         try { previous = registerSubmission(previous, JSON.parse(storage.getItem(name))); } catch { /* A malformed outbox entry cannot become a submission. */ }
       }
       const next = pruneNotificationState(transform(previous)), after = JSON.stringify(next);
+      for (const [id,item] of Object.entries(next.notices)) if (!previous.notices[id]) diagnosticLog('notification-created',{id,key:item.key,type:item.type,customer:item.customer});
+      for (const id of Object.keys(previous.notices)) if (!next.notices[id]) diagnosticLog('notification-removed',{id});
       if (after !== before) storage.setItem(key, after);
       for (const name of pending) storage.removeItem(name);
       if (after !== before) publish();
@@ -56,7 +59,8 @@ export function createNotificationStore(account, { storage = localStorage, locks
     if (Object.keys(pruneNotificationState(saved).notices).length !== count) void update(state => state).catch(() => {});
   } catch (error) { onError(error); }
   return {
-    key, read,
+    key, read, account,
+    saveMonitor: monitor => update(state => ({...state,monitor})),
     registerSubmission(record) {
       if (disposed) return;
       const valid = submissionRecord(record);
@@ -80,7 +84,7 @@ export function createNotificationStore(account, { storage = localStorage, locks
     }),
     observe: (record, time) => update(state => observeRecord(state, record, time)),
     dismiss: (id, mute = false) => update(state => dismissNotification(state, id, mute)),
-    clear: () => update(state => ({ ...state, notices: {} })),
+    clear: () => update(state => { acknowledgeNotices(state,Object.values(state.notices)); diagnosticLog('notifications-cleared',{count:Object.keys(state.notices).length}); return {...state,notices:{}}; }),
     reset: () => update(() => emptyNotificationState()),
     async claim(id) {
       let claimed = false;

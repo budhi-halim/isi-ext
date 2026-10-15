@@ -35,13 +35,14 @@
       <button type="button" id="refresh-storage" class="isi-button isi-button--quiet">Refresh storage usage</button>
       <button type="button" id="clear-account-archive" class="isi-button" disabled>Delete my offline copy</button>
       <button type="button" id="clear-all-archives" class="isi-button">Delete all offline copies</button>
-      <p class="isi-muted">Deletion pauses offline saving for the signed-in account. Live portal records and notification history are unchanged.</p>
+      <p class="isi-muted">Deletion preserves your saving settings. Enabled saving rebuilds the offline copy automatically. Live portal records and notification history are unchanged.</p>
       <p id="archive-settings-message" role="status"></p>
     </details>
     <p id="message" role="status" class="isi-muted"></p>
     <details data-account-settings class="connection-diagnostics">
       <summary>Connection diagnostics</summary>
-      <p class="isi-muted">Recent request timing and failures. No record contents or credentials.</p>
+      <p class="isi-muted">Activity is logged automatically for up to seven days, within the storage limit. The download includes request timing, queue decisions, failures and captured source responses. Credentials are excluded.</p>
+      <button type="button" id="download-diagnostic-log" class="isi-button">Download activity log</button>
       <button type="button" id="copy-diagnostics" class="isi-button isi-button--quiet">Copy diagnostics</button>
       <p id="diagnostics-status" role="status"></p>
     </details>

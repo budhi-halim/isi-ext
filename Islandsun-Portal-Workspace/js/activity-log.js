@@ -1,9 +1,13 @@
+import { diagnosticLog } from './diagnostic-log.js';
+
 const PAUSE_REASONS = Object.freeze({
   navigation: 'a portal page is loading',
   editor: 'a request editor is open; its product cart is protected',
   offline: 'the portal is unreachable; only connection recovery checks continue',
   recovery: 'the portal needs recovery time after a failed or interrupted request',
   table: 'a visible table or foreground request has priority',
+  action: 'a save or submission is in progress',
+  interaction: 'a search field or request selector is active; background work resumes after one minute idle',
   settling: 'waiting for portal navigation to settle',
   reading: 'another portal request is still running',
   queued: 'higher-priority portal requests are queued',
@@ -21,11 +25,11 @@ export function activityTime(value = Date.now()) {
   return [date.getHours(), date.getMinutes(), date.getSeconds()].map(part => String(part).padStart(2, '0')).join(':');
 }
 
-/** Console-only development observations: bounded deduplication, no retained history or response data. */
+/** Deduplicate console messages and retain the same meaningful lifecycle changes. */
 export function createActivityLog(scope, { now = Date.now, write = text => console.info(text) } = {}) {
   const notes = new Map();
   let paused, closed = false;
-  const emit = text => { if (!closed) write(`${activityTime(now())} [Workspace · ${scope}] ${text}`); };
+  const emit = text => { if (!closed) { write(`${activityTime(now())} [Workspace · ${scope}] ${text}`); diagnosticLog('activity',{scope,message:text}); } };
   return {
     note(key, text, repeatAfter = 60000) {
       if (closed || notes.has(key) && now() - notes.get(key) < repeatAfter) return;

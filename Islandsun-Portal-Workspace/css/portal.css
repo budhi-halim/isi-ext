@@ -206,7 +206,7 @@ html:not([data-isi-boot="off"]) .main-header .user-menu > a { color: var(--isi-t
 [data-isi-portal="enabled"] .main-header .navbar-nav > li > a { color: var(--isi-muted) !important; background: transparent !important; }
 [data-isi-portal="enabled"] .main-sidebar { width: 244px; padding-top: 92px; background: var(--isi-background) !important; border: 0; }
 [data-isi-portal="enabled"] .sidebar { padding: 0 16px; max-height: calc(100dvh - 104px); overflow: auto; }
-[data-isi-portal="enabled"] .sidebar-menu { padding: 0; }
+[data-isi-portal="enabled"] .sidebar-menu { padding: 6px; }
 [data-isi-portal="enabled"] .sidebar-menu > li > a { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 11px 13px; margin-bottom: 4px; border: 0 !important; border-radius: var(--isi-control-radius); background: transparent !important; color: var(--isi-muted) !important; font-weight: 500; font-size: 13px; }
 [data-isi-portal="enabled"] .sidebar-menu > li > a > span:not(.pull-right-container) { flex: 1 1 0; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 [data-isi-portal="enabled"] .sidebar-menu > li > a > .pull-right-container { margin-left: auto; position: static; }
@@ -409,7 +409,7 @@ html:not([data-isi-boot="off"]) .main-header .user-menu > a { color: var(--isi-t
 [data-isi-portal="enabled"] .small-box [data-isi-card-link] { position: absolute; inset: 0; border-radius: inherit; background: transparent !important; z-index: 2; }
 [data-isi-portal="enabled"] .small-box:has([data-isi-card-link]:hover) { border-color: var(--isi-primary) !important; }
 [data-isi-portal="enabled"] .sidebar-menu,[data-isi-portal="enabled"] .sidebar-menu :is(li,a,span,i) { transform: none; }
-[data-isi-portal="enabled"] .sidebar-menu [data-isi-submenu]:not([hidden]) { display: block; padding: 4px 0 4px 12px; margin: 0; overflow: hidden; }
+[data-isi-portal="enabled"] .sidebar-menu [data-isi-submenu]:not([hidden]) { display: block; padding: 6px 6px 6px 12px; margin: 0; overflow: hidden; }
 [data-isi-portal="enabled"] .sidebar-menu a { min-height: 42px; margin: 0 !important; }
 [data-isi-portal="enabled"] .sidebar-menu a[aria-expanded="true"] .pull-right-container { transform: rotate(90deg) !important; }
 [data-isi-portal="enabled"] .main-sidebar { position: fixed; bottom: 0; overflow: auto; }

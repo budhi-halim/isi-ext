@@ -28,8 +28,8 @@ export async function readTirRecordProducts(url, signal, options) {
   return { ...selectedTirProducts(root), documents: documentReadiness(root) };
 }
 
-export async function readTirSourceProducts(url, signal, { priority = true, readText = readPortalText } = {}) {
+export async function readTirSourceProducts(url, signal, { priority = true, purpose, readText = readPortalText } = {}) {
   if (!isTirSourceUrl(url)) throw new Error('This request link is unavailable.');
-  const html = await readText(url, { signal, priority, editorLookup: url, maxBytes: 4 * 1024 * 1024 });
+  const html = await readText(url, { signal, priority, purpose, editorLookup: url, maxBytes: 4 * 1024 * 1024 });
   return parseTirProducts(html);
 }

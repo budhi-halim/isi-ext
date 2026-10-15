@@ -194,8 +194,8 @@ export async function sealRecord(record) {
   const {fields,number,detail,...metadata} = record;
   if (fields !== undefined || number !== undefined) metadata.content = await sealBytes(raw,encoder.encode(JSON.stringify({fields,number})),`record:${record.key}`);
   if (detail !== undefined) metadata.detailContent = await sealBytes(raw,encoder.encode(JSON.stringify(detail)),`detail:${record.key}`);
-  if (metadata.fingerprint && !metadata.fingerprint.startsWith('sha256:')) {
-    metadata.fingerprint = `sha256:${pack(await crypto.subtle.digest('SHA-256',encoder.encode(metadata.fingerprint))).map(value => value.toString(16).padStart(2,'0')).join('')}`;
+    for (const field of ['fingerprint','detailRevision']) if (metadata[field] && !metadata[field].startsWith('sha256:')) {
+      metadata[field] = `sha256:${pack(await crypto.subtle.digest('SHA-256',encoder.encode(metadata[field]))).map(value => value.toString(16).padStart(2,'0')).join('')}`;
   }
   return metadata;
 }

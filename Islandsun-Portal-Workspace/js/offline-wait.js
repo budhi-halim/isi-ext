@@ -3,6 +3,8 @@ const WAIT_MESSAGES = Object.freeze({
   startup: 'Waiting for browser activity checks to finish.',
   navigation: 'Waiting for an online portal tab to finish loading.',
   table: 'Saving is paused while you use a table or its results are loading.',
+  action: 'Saving is paused while a request is being saved or submitted.',
+  interaction: 'A search or request selector has priority. Saving resumes after one minute idle.',
   settling: 'Waiting briefly for online navigation to settle.',
   editor: 'Saving is paused while a portal request editor is open.',
   recovery: 'Giving the portal time to recover after a failed request.',

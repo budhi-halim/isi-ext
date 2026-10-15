@@ -3,6 +3,7 @@ import { readAccountSettings } from './account-settings.js';
 import { resumeOfflineSession } from './offline-session.js';
 import { beginCapture, captureStatus, appendCapture, stopCapture } from './debug-capture-store.js';
 import { safeRequestUrl, safeRequestBody, captureResponseBody, responseHeaders, capturedText, CAPTURE_LIMITS } from './debug-capture-data.js';
+import { appendJournal, diagnosticFields } from './diagnostic-journal-store.js';
 
 const POINTER='islandsun.debug-capture-active';
 const PORTAL='http://apps.islandsunindonesia.com:81';
@@ -13,6 +14,13 @@ export function startDebugCapture() {
   const pending=new Set();
   const clientRequests=new Map();
   const ready=chrome.storage.session.get(POINTER).then(saved=>{active=saved[POINTER] || null;});
+  let journalFailure = false;
+  async function captureContext() {
+    const manual = await current();
+    if (manual) return manual;
+    const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
+    return { id: `automatic:${scope?.account || ''}`, account: scope?.account || '', automatic: true, expiresAt: Date.now() + 86400000 };
+  }
   async function current() {
     await ready;
     if(!active || closing)return null;
@@ -28,9 +36,19 @@ export function startDebugCapture() {
     return value;
   }
   async function note(event,fields={},session=null) {
+    const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
+    const {body,...metadata} = fields;
+    if (session?.account && session.account !== scope?.account) return;
+    try {
+      await appendJournal(session?.account || scope?.account || '', event, {...diagnosticFields(metadata),...(body ? {body} : {})});
+      if (journalFailure) { journalFailure = false; await chrome.storage.local.remove('islandsun.journal-error'); }
+    } catch (error) {
+      journalFailure = true;
+      await chrome.storage.local.set({'islandsun.journal-error':{at:Date.now(),name:error.name,message:'Diagnostic history could not be saved.'}}).catch(()=>{});
+    }
     try {
       const value=session || await current(); if(!value)return;
-      const scope=(await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
+      if (value.automatic) return;
       if(scope?.account!==value.account)return;
       await appendCapture(value.account,value.id,{at:Date.now(),event,...fields});
     } catch {
@@ -40,7 +58,7 @@ export function startDebugCapture() {
   }
   async function read(url,options,context={}) {
     let session;
-    try { session=await current(); } catch { session=null; }
+    try { session=await captureContext(); } catch { session=null; }
     if(!session)return fetch(url,options);
     const attemptId=crypto.randomUUID(),startedAt=Date.now();
     const request={url:safeRequestUrl(String(url)),method:options.method || 'GET',body:safeRequestBody(options.body),credentials:options.credentials || 'same-origin',redirect:options.redirect || 'follow',cache:options.cache || 'default',timeoutMs:context.timeoutMs,initiator:'extension-service-worker',referrerPolicy:options.referrerPolicy || 'browser-default'};
@@ -64,10 +82,16 @@ export function startDebugCapture() {
     if(area==='local' && (changes[ACCOUNT_SCOPE] || changes.enabled)) current().catch(()=>{});
   });
   chrome.runtime.onMessage.addListener((message,sender,respond)=>{
+    if (message?.type === 'diagnostic-event') {
+      const ownPage = sender.id === chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL('')) || sender.url?.startsWith(`${PORTAL}/islandsun/`));
+      if (!ownPage || typeof message.event !== 'string' || !/^[a-z][a-z0-9-]{0,79}$/.test(message.event)) return;
+      note(message.event,{...diagnosticFields(message.fields || {}),tabId:sender.tab?.id}).then(()=>respond({ok:true}),()=>respond({ok:false}));
+      return true;
+    }
     if (['debug-portal-start','debug-portal-event','debug-portal-processing'].includes(message?.type)) {
       if (sender.id!==chrome.runtime.id || !sender.tab || !sender.url?.startsWith(`${PORTAL}/islandsun/`)) return;
       (async()=>{
-        const session=await current();
+        const session=await captureContext();
         if (!session) return {};
         const context={initiator:'extension-content-script',tabId:sender.tab.id};
         const validUrl=value=>{
@@ -78,8 +102,8 @@ export function startDebugCapture() {
           for (const [id,value] of clientRequests) if (value.expiresAt<Date.now() || value.sessionId!==session.id) clientRequests.delete(id);
           if (clientRequests.size>=64 || !validUrl(message.request?.url) || !/^(?:sample|tir|portal)-(?:index|detail|products|source|read)$/.test(message.kind)) return {};
           const attemptId=crypto.randomUUID();
-          clientRequests.set(attemptId,{...context,documentId:sender.documentId,sessionId:session.id,kind:message.kind,expiresAt:Date.now()+30000});
-          const request={url:safeRequestUrl(message.request.url),method:message.request.method==='POST'?'POST':'GET',body:safeRequestBody(message.request.body),credentials:'include',redirect:'manual',timeoutMs:10000};
+          clientRequests.set(attemptId,{...context,documentId:sender.documentId,sessionId:session.id,kind:message.kind,expiresAt:Date.now()+120000});
+          const request={url:safeRequestUrl(message.request.url),method:message.request.method==='POST'?'POST':'GET',body:safeRequestBody(message.request.body),credentials:'include',redirect:'manual',timeoutMs:message.request.timeoutMs === 60000 ? 60000 : 25000};
           await note('request-start',{...context,attemptId,kind:message.kind,request},session);
           return {attemptId,expiresAt:session.expiresAt};
         }
@@ -146,7 +170,8 @@ export function startDebugCapture() {
     })().then(respond,error=>respond({ok:false,error:error.message}));
     return true;
   });
-  return {note,recording:()=>Boolean(active) && !closing,fetch(url,options,context){
+  note('worker-start',{version:chrome.runtime.getManifest().version}).catch(()=>{});
+  return {note,recording:()=>true,fetch(url,options,context){
     const operation=read(url,options,context);pending.add(operation);
     operation.then(()=>pending.delete(operation),()=>pending.delete(operation));
     return operation;

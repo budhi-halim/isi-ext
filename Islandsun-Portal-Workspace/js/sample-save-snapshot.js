@@ -19,5 +19,9 @@ export function sampleProductSnapshot(form) {
   if (columns.some(index => index < 0)) return null;
   const rows = [...table.querySelectorAll('tbody > tr')].filter(row => row.cells.length > Math.max(...columns));
   if (!rows.length) return null;
-  return rows.map(row => columns.map(index => normalize(row.cells[index].textContent)));
+  return rows.map(row => columns.map((index,column) => {
+    const value = normalize(row.cells[index].textContent);
+    // The saved form can omit insignificant decimal zeros in price columns.
+    return column >= 2 && column <= 4 && /^\d+(?:\.\d+)?$/.test(value) ? String(Number(value)) : value;
+  }));
 }

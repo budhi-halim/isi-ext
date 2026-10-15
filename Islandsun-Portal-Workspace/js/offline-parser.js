@@ -61,7 +61,9 @@ export function normalizeIndex(account, kind, payload, {partial = false, include
       if (!/^\d+$/.test(id)) throw new Error('The portal returned an invalid record identifier.');
       detailUrl = `${PORTAL_HOME}${detailPath}${id}`;
     }
-    return {key:archiveKey(account,kind,id), account, kind, id, date, pendingDate, number, fields, detailUrl, fingerprint:JSON.stringify(fields), savedAt:Date.now()};
+    const stateFields = [source.status, ...({sample:['sr_statfeedback','sr_statkirimbarang'],tir:['tir_locked_status'],delivery:['status'],sudden:['srs_status']}[kind] || [])].filter(Boolean);
+    const detailRevision = JSON.stringify(stateFields.length ? stateFields.map(key => fields[key] || '') : fields);
+    return {key:archiveKey(account,kind,id), account, kind, id, date, pendingDate, number, fields, detailUrl, detailRevision, fingerprint:JSON.stringify(fields), savedAt:Date.now()};
   });
   const result = kind === 'products' ? [...new Map(records.map(record=>[record.key,record])).values()] : records;
   return includeOmitted ? result : includedIndexRows(result);

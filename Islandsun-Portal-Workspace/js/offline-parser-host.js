@@ -10,14 +10,15 @@ import { parseSampleSheet } from './offline-sample-print.js';
 import { seedVaultKey } from './offline-vault.js';
 import { includedIndexRows } from './offline-index-identity.js';
 import { indexCompletion } from './offline-index-completion.js';
-let generation = 0;
+let generation = 0, operations = Promise.resolve();
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || message?.target !== 'offline-parser') return;
   if (sender.url !== chrome.runtime.getURL('js/background.js')) return;
   if (message.operation === 'cancel') { generation++; respond({result:true}); return; }
   const current = generation;
-  (async () => {
+  const operation = operations.then(async () => {
+    if (current !== generation) throw new DOMException('Archive paused.','AbortError');
     if (message.account) {
       if (!Array.isArray(message.vaultKey) || message.vaultKey.length !== 32 || !message.vaultKey.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) throw new Error('The archive unlock key is unavailable.');
       seedVaultKey(message.account,message.vaultKey);
@@ -80,9 +81,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       records = records.map(record => ({...record,scopeVersion:ARCHIVE_SCOPE_VERSION}));
     }
     else {
-      if (message.operation !== 'index') throw new Error('Unknown archive operation.');
-      if (message.kind !== 'products') throw new Error('Portal records require a verified signed-in list.');
+      if (!['index','observed-index'].includes(message.operation)) throw new Error('Unknown archive operation.');
+      if (message.kind !== 'products' && !(message.operation === 'observed-index' && ['sample','tir'].includes(message.kind))) throw new Error('Portal records require a verified signed-in list.');
       records = normalizeIndex(message.account,message.kind,JSON.parse(message.text),{includeOmitted:true});
+      if (message.operation === 'observed-index') records = records.map(record => ({...record,scopeVersion:ARCHIVE_SCOPE_VERSION}));
     }
     const key = `index:${message.account}:${message.kind}`;
     const previous = await readArchive('meta',key);
@@ -99,9 +101,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     await archiveMeta(key, {...indexCompletion(previous,{reconciled,total:records.length,stored,skippedIdentifiers}),
       total:records.length, stored, skippedIdentifiers, importing:false,partial:!reconciled,pendingDates});
     return {total:records.length, stored, skippedIdentifiers};
-  })().finally(() => {
+  }).finally(() => {
     if (message.account) seedVaultKey(message.account,null);
     delete message.vaultKey;
-  }).then(result => respond({result}), error => respond({error:error.message}));
+  });
+  operations = operation.catch(() => {});
+  operation.then(result => respond({result}), error => respond({error:error.message}));
   return true;
 });

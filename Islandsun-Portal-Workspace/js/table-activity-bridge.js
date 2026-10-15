@@ -1,6 +1,6 @@
 (() => {
   if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
-  let port, retry, busy = false;
+  let port, retry, busy = false, interactionPort, interactionUntil = 0, interactionTimer, interactionRetry;
   const reads = new Map();
   const respond = (id,granted) => document.dispatchEvent(new CustomEvent('islandsun-table-read-response',{detail:{id,granted}}));
   function releaseRead(id,failed) {
@@ -52,11 +52,35 @@
       });
     } catch { release(); }
   }
+  function releaseInteraction() {
+    clearTimeout(interactionTimer); clearTimeout(interactionRetry);
+    const previous = interactionPort; interactionPort = null; previous?.disconnect();
+  }
+  function connectInteraction() {
+    clearTimeout(interactionRetry);
+    if (interactionUntil <= Date.now()) { releaseInteraction(); return; }
+    try {
+      if (!interactionPort) {
+        const current = chrome.runtime.connect({name:'islandsun-interaction-guard'});
+        interactionPort = current;
+        current.onDisconnect.addListener(() => {
+          if (interactionPort !== current) return;
+          interactionPort = null;
+          if (interactionUntil > Date.now()) interactionRetry = setTimeout(connectInteraction,1000);
+        });
+      }
+      interactionPort.postMessage({until:interactionUntil});
+      clearTimeout(interactionTimer);
+      interactionTimer = setTimeout(releaseInteraction,interactionUntil-Date.now());
+    } catch { releaseInteraction(); }
+  }
   document.addEventListener('islandsun-table-activity',event => {
     busy = event.detail?.busy === true;
     if (busy) connect(); else release();
+    interactionUntil = Math.min(Date.now() + 60000, Number(event.detail?.interactionUntil) || 0);
+    connectInteraction();
   });
-  window.addEventListener('pagehide',() => { busy = false; release(); for (const id of reads.keys()) releaseRead(id); });
+  window.addEventListener('pagehide',() => { busy = false; interactionUntil = 0; release(); releaseInteraction(); for (const id of reads.keys()) releaseRead(id); });
   window.addEventListener('pageshow',() => document.dispatchEvent(new Event('islandsun-table-activity-request')));
   document.dispatchEvent(new Event('islandsun-table-activity-request'));
 })();

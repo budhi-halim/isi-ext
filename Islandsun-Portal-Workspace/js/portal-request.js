@@ -5,6 +5,7 @@ import { logFetch, logFetchResult, requestNumber as knownRequestNumber } from '.
 import { createActivityLog } from './activity-log.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { capturePortalFetch } from './debug-capture-client.js';
+import { recordKind } from './fetch-policy.js';
 
 async function verifyPageAccount() {
   const link = document.querySelector('.user-menu a[href*="lockscreen?user="]');
@@ -46,7 +47,7 @@ function listen() {
   }, { passive: true });
 }
 
-function acquireRead(signal, priority, editorLookup) {
+function acquireRead(signal, priority, editorLookup, purpose, url) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(signal.reason); return; }
     const port = chrome.runtime.connect({ name: 'islandsun-read-gate' });
@@ -58,9 +59,9 @@ function acquireRead(signal, priority, editorLookup) {
       catch { /* Disconnection owns cleanup and the error result. */ }
     }, 4000);
     const timeout = setTimeout(() => {
-      activity.note('queue-timeout', 'Queue wait reached 60s; this attempt stopped. Background checks retry automatically.');
+      activity.note('queue-timeout', 'Queue wait reached two minutes; this attempt stopped. Background checks retry automatically.');
       stop(new Error('The portal is busy. Please try again shortly.'));
-    }, 60000);
+    }, 120000);
     function stop(error) {
       released = true; clearTimeout(timeout); clearTimeout(waiting); signal?.removeEventListener('abort', abort); port.disconnect();
       if (!granted) reject(error);
@@ -105,21 +106,21 @@ function acquireRead(signal, priority, editorLookup) {
         if (yielding) throw new DOMException('Portal table activity has priority.','AbortError');
       } });
     });
-    port.postMessage({ type: 'read', priority, editorLookup });
+    port.postMessage({ type: 'read', priority, editorLookup, purpose, url, kind:url ? recordKind(url) : undefined });
   });
 }
 
 /** Keep a record's dependent reads together so another record cannot replace portal session state. */
-export async function withPortalRead(task, { signal, priority = false, editorLookup } = {}) {
+export async function withPortalRead(task, { signal, priority = false, editorLookup, purpose, url } = {}) {
   listen();
   signal = signal ? AbortSignal.any([signal, lifecycle.signal]) : lifecycle.signal;
   if (editorLookup && !isTirSourceUrl(editorLookup)) throw new Error('This request link is unavailable.');
-  const permit = await acquireRead(signal, priority, editorLookup);
+  const permit = await acquireRead(signal, priority, editorLookup, purpose, url || editorLookup);
   const transactionSignal = AbortSignal.any([signal, permit.signal]);
   let previousRead = false;
   const loggedRecords = new Set();
   let failed = false;
-  async function read(url, { signal: _signal, priority: _priority, editorLookup: _lookup, maxBytes, requestNumber, ...options } = {}) {
+  async function read(url, { signal: _signal, priority: _priority, editorLookup: _lookup, purpose:_purpose, url:_url, binary = false, maxBytes, requestNumber, ...options } = {}) {
     permit.assertAvailable();
     if (!portalUrl(String(url))) throw new Error('This portal link is unavailable.');
     if (editorLookup && (String(url) !== editorLookup || (options.method && options.method !== 'GET'))) throw new Error('This request link is unavailable.');
@@ -132,7 +133,7 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
     });
     previousRead = true;
     permit.assertAvailable();
-    const timeout = AbortSignal.timeout(10000);
+    const timeout = AbortSignal.timeout(binary ? 60000 : 25000);
     const requestSignal = AbortSignal.any([permit.signal, timeout]);
     const started = performance.now(), kind = requestKind(url);
     let status = 0, outcome = 'complete';
@@ -147,7 +148,7 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
         loggedRecords.add(number);
       }
       // Background reads must never follow a protected page into a login/logout handler.
-      const response = await capturePortalFetch(url, { ...options, credentials: 'include', redirect: 'manual', signal: requestSignal }, kind);
+      const response = await capturePortalFetch(url, { ...options, credentials: 'include', redirect: 'manual', signal: requestSignal }, kind, binary ? 60000 : 25000);
       status = response.status;
       if (response.type === 'opaqueredirect' || status >= 300 && status < 400) {
         const error = new Error('The portal redirected this background lookup. Live checks are paused briefly; your current page is unchanged.');
@@ -156,19 +157,30 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
       }
       if (!portalUrl(response.url) || /\/login(?:\/|$)/i.test(new URL(response.url).pathname)) throw new Error('Your session has expired. Sign in to Islandsun and try again.');
       if (!response.ok) throw new Error('The record could not be loaded. Please try again.');
-      if (!maxBytes) { const text = await response.text(); await verifyPageAccount(); return text; }
+      if (!maxBytes && !binary) { const text = await response.text(); await verifyPageAccount(); return text; }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let bytes = 0, text = '';
+      const chunks = [];
       try {
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
           bytes += value.byteLength;
-          if (bytes > maxBytes) throw new Error('This product list is too large to preview. Open the request to view it.');
-          text += decoder.decode(value, { stream: true });
+          if (bytes > (maxBytes || 32*1024*1024)) throw new Error('This response is too large to check in the background.');
+          if (binary) chunks.push(value); else text += decoder.decode(value, { stream: true });
         }
         await verifyPageAccount();
+        if (binary) {
+          const buffer = new Uint8Array(bytes);
+          let offset = 0;
+          for (const chunk of chunks) { buffer.set(chunk,offset); offset += chunk.length; }
+          const prefix = new TextDecoder().decode(buffer.slice(0,512)).trimStart();
+          if (!bytes || /html/i.test(response.headers.get('content-type')) || /^<(?:!doctype|html|head|body)/i.test(prefix)) throw new Error('The server returned a page instead of a document.');
+          let value = '';
+          for (let index=0;index<buffer.length;index+=8192) value += String.fromCharCode(...buffer.subarray(index,index+8192));
+          return {base64:btoa(value),mime:response.headers.get('content-type') || '',lastModified:response.headers.get('last-modified') || null};
+        }
         return text + decoder.decode();
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     } catch (error) {
@@ -187,4 +199,4 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
   finally { permit.release(transactionSignal.aborted && !failed ? undefined : failed); }
 }
 
-export function readPortalText(url, options) { return withPortalRead(read => read(url, options), options); }
+export function readPortalText(url, options) { return withPortalRead(read => read(url, options), {...options,url}); }

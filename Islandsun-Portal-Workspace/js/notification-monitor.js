@@ -2,89 +2,150 @@ import { readMonitorIndex, readMonitoredRecord } from './monitor-data.js';
 import { acquireLocalLock } from './local-lock.js';
 import { monitorDetailsEligible } from './submission-logic.js';
 import { createActivityLog } from './activity-log.js';
+import { INDEX_FRESH_MS, PREVIEW_FRESH_MS, statusSignature } from './fetch-policy.js';
+import { shouldMonitorTir, documentBaseline } from './tir-document-policy.js';
+import { checkTirDocuments } from './tir-document-check.js';
+import { diagnosticLog } from './diagnostic-log.js';
+import { OFFLINE_STATUS } from './offline-config.js';
+import { calendarDay } from './notification-logic.js';
 
-/** One portal tab owns polling regardless of visibility; reads remain serial and retry on failure. */
+/** Persist the current schedule so page changes and browser restarts do not restart discovery. */
 export function createNotificationMonitor(store, repository, notices, accountName, {
   readIndex = readMonitorIndex, readRecord = readMonitoredRecord, acquireLock = acquireLocalLock,
+  checkDocuments = checkTirDocuments,
+  readArchiveStatus = async () => (await chrome.storage.local.get(OFFLINE_STATUS))[OFFLINE_STATUS],
   activity = createActivityLog('Notification checks'),
 } = {}) {
-  const seen = new Map(), records = new Map();
   let disposed = false, busy = false, timer, controller, releaseLeadership;
-  let indexedAt = 0, retry = 15000, idleSince = 0;
-  const relinquish = () => { releaseLeadership?.(); releaseLeadership = null; };
-  const pause = () => { clearTimeout(timer); controller?.abort(); relinquish(); };
-  const schedule = delay => { clearTimeout(timer); if (!disposed) timer = setTimeout(tick, delay); };
+  let retry = 15000;
+  let memory = store.read().monitor || {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
+  const schedule = delay => { clearTimeout(timer); if (!disposed) timer = setTimeout(tick,delay); };
+  async function checkpoint() {
+    if (!disposed) await store.saveMonitor?.(memory);
+  }
+  function warmupQueue() {
+    const kinds = ['sample','tir'];
+    const lists = Object.fromEntries(kinds.map(kind => [kind,memory.records.filter(record => record.kind === kind)
+      .sort((a,b) => (calendarDay(b.date) || 0)-(calendarDay(a.date) || 0) || Number(b.id)-Number(a.id))]));
+    const pageSize = Math.max(5,Math.min(100,Number(document.querySelector?.('[name="mytable_length"]')?.value) || memory.pageSize || 10));
+    memory.pageSize = pageSize; repository.setPageSize?.(pageSize);
+    const queue = [];
+    for (let page=0;page<3;page++) for (const kind of kinds) {
+      for (const record of lists[kind].slice(page*pageSize,(page+1)*pageSize)) queue.push(`${record.kind}:${record.id}`);
+    }
+    return queue;
+  }
+  async function observe(record, signal, purpose, documents = false) {
+    const key = `${record.kind}:${record.id}`, previous = memory.checked[key];
+    const signature = statusSignature(record);
+    const changed = previous && previous.signature !== signature;
+    async function retain(result, verifiedDocuments) {
+      signal.throwIfAborted();
+      await store.observe(result);
+      memory.checked[key] = {...memory.checked[key],signature,at:Date.now(),snapshot:result,retryAt:0,
+        ...(record.kind === 'tir' ? {documents:verifiedDocuments ? Object.fromEntries(result.documents.map(item=>[item.id,item])) : documentBaseline(result,previous?.documents)} : {})};
+      await checkpoint();
+    }
+    try {
+      let result = await readRecord(record,repository,signal,{purpose,fresh:!!changed});
+      if (documents && record.kind === 'tir') result = await checkDocuments(result,previous,signal,partial => retain(partial,true));
+      await retain(result,documents);
+      diagnosticLog('monitor-observed',{kind:record.kind,number:record.number,purpose,statusChanged:!!changed,documents});
+      return true;
+    } catch (error) {
+      if (signal.aborted || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
+      memory.checked[key] = {...memory.checked[key],retryAt:Date.now()+60000};
+      diagnosticLog('monitor-retry',{kind:record.kind,number:record.number,retryAt:memory.checked[key].retryAt,errorType:error.name,code:error.code});
+      activity.note('record-retry','A record check failed; retry in 60s. Other eligible records can continue.');
+      await checkpoint(); return false;
+    }
+  }
   async function tick() {
     if (disposed) return;
     if (busy) { schedule(1000); return; }
-    busy = true;
-    controller = new AbortController();
-    const interruption = controller.signal;
-    const signal = AbortSignal.any([interruption, AbortSignal.timeout(30000)]);
+    busy = true; controller = new AbortController();
+    const signal = controller.signal;
     try {
       if (!releaseLeadership) {
-        const release = await acquireLock(`${store.key}:monitor`, { wait: false, onLost: () => { releaseLeadership = null; controller?.abort(); schedule(5000); } });
+        const release = await acquireLock(`${store.key}:monitor`,{wait:false,onLost:() => { releaseLeadership = null; controller?.abort(); schedule(5000); }});
         if (disposed || signal.aborted) { release?.(); return; }
         releaseLeadership = release;
+        if (release) memory = store.read().monitor || memory;
       }
       if (!releaseLeadership) { activity.pause('other-tab'); schedule(5000); return; }
-      if (!indexedAt || Date.now() - indexedAt > 30000) {
+      if (!memory.indexedAt || Date.now()-memory.indexedAt >= INDEX_FRESH_MS) {
         const observedAt = Date.now();
-        const index = [...await readIndex('tir', signal, accountName), ...await readIndex('sample', signal, accountName)];
-        if (disposed || signal.aborted) return;
-        await store.observeStatuses(index, { observedAt });
-        records.clear(); for (const record of index) if (monitorDetailsEligible(record)) records.set(`${record.kind}:${record.id}`, record);
-        for (const key of seen.keys()) if (!records.has(key)) seen.delete(key);
-        indexedAt = Date.now();
-        notices.dismiss('notification-session');
-      }
-      const started = performance.now();
-      const state = store.read(), tracked = [], discovery = [];
-      for (const [key, record] of records) {
-        const previous = seen.get(key), pending = state.jobs[key];
-        if (previous?.retryAt > Date.now()) continue;
-        const lifetime = pending ? 15000 : 300000;
-        if (previous && previous.status === record.status && Date.now() - previous.time < lifetime) continue;
-        // Completed TIRs are baselines unless an incomplete document was previously observed.
-        if (!pending && /^(complete|completed)$/i.test(record.status) && record.kind === 'tir') continue;
-        (pending ? tracked : discovery).push({ key, record, checked: previous?.time || 0 });
-      }
-      tracked.sort((a,b) => a.checked - b.checked);
-      discovery.sort((a,b) => a.checked - b.checked);
-      const batch = [...tracked.slice(0,3), ...discovery.slice(0,Math.max(1,4-Math.min(3,tracked.length)))];
-      if (batch.length) { idleSince = 0; activity.resume(); }
-      else {
-        if (!idleSince) idleSince = Date.now();
-        if (Date.now() - idleSince >= 30000) activity.pause('idle');
-      }
-      for (const {key,record} of batch) {
-        if (signal.aborted) return;
-        let result;
-        try { result = await readRecord(record, repository, signal); }
-        catch (error) {
-          if (signal.aborted || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
-          seen.set(key, { status: record.status, time: 0, retryAt: Date.now() + 60000 });
-          activity.note('record-retry', 'A record check failed; retry in 60s. Other eligible records can continue.');
-          continue;
+        const index = [...await readIndex('sample',signal,accountName),...await readIndex('tir',signal,accountName)];
+        signal.throwIfAborted();
+        await store.observeStatuses(index,{observedAt});
+        memory.records = index; memory.indexedAt = Date.now();
+        const present = new Set(index.map(record=>`${record.kind}:${record.id}`));
+        for (const key of Object.keys(memory.checked)) if (!present.has(key)) delete memory.checked[key];
+        // Weekly reminders advance from the verified snapshot without another detail request.
+        for (const record of index) {
+          const previous = memory.checked[`${record.kind}:${record.id}`];
+          if (previous?.snapshot && previous.signature === statusSignature(record)) await store.observe({...previous.snapshot,...record});
         }
-        if (disposed || signal.aborted) return;
-        await store.observe(result);
-        seen.set(key, { status: record.status, time: Date.now() });
+        await checkpoint(); notices.dismiss('notification-session');
+        diagnosticLog('monitor-index',{records:index.length,intervalMs:INDEX_FRESH_MS});
       }
-      retry = 15000;
-      schedule(batch.length ? Math.max(1000, Math.min(15000, performance.now() - started)) : 5000);
+      memory.warmup ||= {}; memory.tir ||= {};
+      if (!memory.warmup.queue && (!memory.warmup.completedAt || Date.now() >= memory.warmup.completedAt+PREVIEW_FRESH_MS)) {
+        memory.warmup = {queue:warmupQueue(),cursor:0,startedAt:Date.now()}; await checkpoint();
+      }
+      const byKey = new Map(memory.records.map(record=>[`${record.kind}:${record.id}`,record]));
+      if (memory.warmup.queue) {
+        const key = memory.warmup.queue[memory.warmup.cursor++], record = byKey.get(key);
+        if (record && !(memory.checked[key]?.retryAt > Date.now())) { activity.resume(); await observe(record,signal,'warmup'); }
+        if (memory.warmup.cursor >= memory.warmup.queue.length) {
+          memory.warmup = {completedAt:Date.now()}; diagnosticLog('warmup-complete',{records:Math.min(memory.records.length,memory.pageSize*6)});
+        }
+        await checkpoint(); schedule(250); return;
+      }
+      const changed = memory.records.find(record => monitorDetailsEligible(record)
+        && !(memory.checked[`${record.kind}:${record.id}`]?.retryAt > Date.now())
+        && memory.checked[`${record.kind}:${record.id}`]?.signature !== statusSignature(record));
+      if (changed) { activity.resume(); await observe(changed,signal,'notification',changed.kind === 'tir'); schedule(250); return; }
+      if (!memory.tir.queue && Date.now() >= (memory.tir.nextAt || 0)) {
+        memory.tir = {queue:memory.records.filter(record => record.kind === 'tir' && monitorDetailsEligible(record)
+          && shouldMonitorTir(record,memory.checked[`tir:${record.id}`])).map(record=>`tir:${record.id}`),cursor:0,startedAt:Date.now()};
+        await checkpoint();
+      }
+      if (memory.tir.queue) {
+        const key = memory.tir.queue[memory.tir.cursor++], record = byKey.get(key);
+        if (record && !(memory.checked[key]?.retryAt > Date.now())) { activity.resume(); await observe(record,signal,'notification',true); }
+        if (memory.tir.cursor >= memory.tir.queue.length) {
+          const archive = await readArchiveStatus();
+          const interval = archive?.caughtUp || archive?.state === 'paused' ? 5*60000 : 2*3600000;
+          memory.tir = {completedAt:Date.now(),nextAt:Date.now()+interval};
+          diagnosticLog('document-pass-complete',{nextAt:memory.tir.nextAt,intervalMs:interval,archiveCaughtUp:archive?.caughtUp === true});
+        }
+        await checkpoint(); schedule(250); return;
+      }
+      const retryRecord = memory.records.find(record => {
+        const previous = memory.checked[`${record.kind}:${record.id}`];
+        return previous?.retryAt && previous.retryAt <= Date.now() && monitorDetailsEligible(record);
+      });
+      if (retryRecord) { await observe(retryRecord,signal,'notification',retryRecord.kind === 'tir'); schedule(250); return; }
+      retry = 15000; activity.pause('idle'); schedule(5000);
     } catch (error) {
-      if (!interruption.aborted && !disposed) {
+      if (!signal.aborted && !disposed) {
         if (error.message === 'session' || /session has expired/i.test(error.message)) {
-          notices.notify('Sign in again to resume notifications.', { key: 'notification-session', error: true });
-          activity.pause('signed-out', Date.now() + 60000);
-          schedule(60000);
-        } else { activity.pause('retry', Date.now() + retry); schedule(retry); retry = Math.min(retry * 2, 120000); }
+          notices.notify('Sign in again to resume notifications.',{key:'notification-session',error:true}); activity.pause('signed-out',Date.now()+60000); schedule(60000);
+        } else { activity.pause('retry',Date.now()+retry); diagnosticLog('monitor-paused',{errorType:error.name,code:error.code,retryAt:Date.now()+retry}); schedule(retry); retry = Math.min(retry*2,120000); }
       }
-    } finally { busy = false; controller = null; if (interruption.aborted && !disposed) schedule(1000); }
+    } finally { busy = false; controller = null; if (signal.aborted && !disposed) schedule(1000); }
   }
-  const visibility = () => activity.note(document.hidden ? 'background' : 'foreground',
-    `Portal tab is ${document.hidden ? 'in the background' : 'visible'}; visibility does not pause checks.`);
-  document.addEventListener('visibilitychange', visibility); visibility(); schedule(1000);
-  return { destroy() { disposed = true; pause(); activity.destroy(); document.removeEventListener('visibilitychange', visibility); seen.clear(); } };
+  const reset = (changes,area) => {
+    const value = changes['islandsun.archive-reset']?.newValue;
+    if (area !== 'local' || !value || value.account && value.account !== store.account) return;
+    controller?.abort(); memory = {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
+    repository.clear?.(); checkpoint().catch(()=>{}); schedule(1000);
+  };
+  globalThis.chrome?.storage?.onChanged?.addListener(reset);
+  schedule(1000);
+  return {destroy() {
+    disposed = true; clearTimeout(timer); controller?.abort(); releaseLeadership?.(); releaseLeadership = null; activity.destroy();
+    globalThis.chrome?.storage?.onChanged?.removeListener(reset);
+  }};
 }

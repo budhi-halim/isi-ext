@@ -1,9 +1,9 @@
 /** Extension ports coordinate insecure-HTTP portal tabs without weakening browser security. */
-export function acquireLocalLock(key, { wait = true, onLost } = {}) {
+export function acquireLocalLock(key, { wait = true, onLost, timeoutMs = 15000 } = {}) {
   return new Promise((resolve, reject) => {
     const port = chrome.runtime.connect({ name: 'islandsun-local-lock' });
     let granted = false, released = false;
-    const timeout = setTimeout(() => { if (!granted) { port.disconnect(); reject(new Error('Notification history is busy. Please try again.')); } }, 15000);
+    const timeout = setTimeout(() => { if (!granted) { port.disconnect(); reject(new Error('The shared request is still busy. Please try again.')); } }, timeoutMs);
     port.onMessage.addListener(message => {
       clearTimeout(timeout);
       if (!message.granted) { port.disconnect(); resolve(null); return; }

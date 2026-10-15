@@ -60,8 +60,12 @@ export function openArchive() {
 }
 
 function queueFields(record, previous) {
-  const priority = previous?.fingerprint !== record.fingerprint ? 0 : previous?.detailPriority ?? (previous?.detailAt ? 1 : 0);
+  const priority = detailChanged(record,previous) ? 0 : previous?.detailPriority ?? (previous?.detailAt ? 1 : 0);
   return {detailPriority:record.detailUrl ? priority : undefined, sortDate:record.date ? -Date.parse(`${record.date}T00:00:00Z`) : 0};
+}
+
+function detailChanged(record, previous) {
+  return previous?.detailRevision && record.detailRevision ? previous.detailRevision !== record.detailRevision : previous?.fingerprint !== record.fingerprint;
 }
 
 function encryptedMetadata(record = {}) {
@@ -140,7 +144,7 @@ export async function saveRecord(record) {
     const done = complete(transaction);
     const store = transaction.objectStore('records');
     const previous = await request(store.get(record.key));
-    const changed = previous?.fingerprint !== record.fingerprint;
+    const changed = detailChanged(record,previous);
     store.put({...encryptedMetadata(previous), ...record, ...queueFields(record,previous), nextDetailAt: changed ? 0 : previous?.nextDetailAt || 0,
       ...(changed ? {detailCapture:null,detailFailures:0} : {})});
     await done;
@@ -164,7 +168,7 @@ export async function saveRecords(records, shouldContinue = () => true) {
         const lookup = store.get(record.key);
         lookup.onsuccess = () => {
           const previous = lookup.result;
-          const changed = previous?.fingerprint !== record.fingerprint;
+          const changed = detailChanged(record,previous);
           store.put({...encryptedMetadata(previous),...record,...queueFields(record,previous),nextDetailAt:changed ? 0 : previous.nextDetailAt || 0,
             ...(changed ? {detailCapture:null,detailFailures:0} : {})});
         };
@@ -198,7 +202,7 @@ export async function updateDetail(key, detail, savedAt = Date.now(), {pendingFi
         && record.detailAt === expected.detailAt && record.rawDetailAt === detail.sourceCapturedAt));
     if (accepted) {
       // A concurrent list refresh owns its content and must remain queued for a matching detail.
-      store.put({...encryptedMetadata(record),content:record.content || encrypted.content,fingerprint:record.content ? record.fingerprint : encrypted.fingerprint,detailContent:encrypted.detailContent,detailAt:savedAt,detailPriority:changed ? 0 : 1,nextDetailAt:changed || pendingFiles ? 0 : savedAt + 86400000,
+      store.put({...encryptedMetadata(record),content:record.content || encrypted.content,fingerprint:record.content ? record.fingerprint : encrypted.fingerprint,detailContent:encrypted.detailContent,detailAt:savedAt,detailPriority:changed ? 0 : 1,nextDetailAt:changed || pendingFiles ? 0 : Number.MAX_SAFE_INTEGER,
         detailCapture:pendingFiles ? {at:savedAt,fingerprint:existing.fingerprint} : null,
         detailFailures:pendingFiles ? record.detailFailures || 0 : 0});
     }
@@ -219,7 +223,7 @@ export async function completeDetailCapture(snapshot) {
     && current.detailCapture.fingerprint === snapshot.fingerprint);
   if (accepted) {
     const resolved = await removeFailureFile(transaction,current.key,'urn:islandsun:archive-source:failed-detail',current.detailAt);
-    store.put({...current,detailCapture:null,detailFailures:0,nextDetailAt:current.detailAt + 86400000,
+    store.put({...current,detailCapture:null,detailFailures:0,nextDetailAt:Number.MAX_SAFE_INTEGER,
       ...(resolved ? {rawDetailFailureAt:0} : {})});
   }
   await done;
@@ -284,7 +288,7 @@ export async function replaceParsedDetail(snapshot, detail, shouldContinue = () 
   },snapshot.date);
 }
 
-export async function saveFile(record, file) {
+export async function saveFile(record, file, {shouldContinue = () => true} = {}) {
   if (!(file.blob instanceof Blob)) throw new TypeError('A saved document needs file bytes.');
   const digest = await crypto.subtle.digest('SHA-256',await file.blob.arrayBuffer());
   const hash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2,'0')).join('');
@@ -301,7 +305,7 @@ export async function saveFile(record, file) {
     const done = complete(transaction);
     const parent = await request(transaction.objectStore('records').get(record.key));
     let accepted = false;
-    if (parent?.account === record.account && (file.purpose !== 'source' || archiveRecordReadable(parent) && parent.fingerprint === record.fingerprint)) {
+    if (shouldContinue() && parent?.account === record.account && (file.purpose !== 'source' || archiveRecordReadable(parent) && parent.fingerprint === record.fingerprint)) {
       const key = JSON.stringify([record.key,file.url]);
       const files = transaction.objectStore('files'), blobs = transaction.objectStore('blobs');
       const previous = await request(files.get(key));
@@ -464,22 +468,22 @@ export async function reconcileRecords(account, kind, keys, scan = null, period 
   return true;
 }
 
-export async function nextDetail(account, {kinds, afterKind} = {}) {
+export async function nextDetail(account, {kinds, afterKind, ordered = false, includeWaiting = false} = {}) {
   const database = await openArchive();
   if (kinds?.length) {
-    const start = Math.max(0,kinds.indexOf(afterKind) + 1);
+    const start = ordered ? 0 : Math.max(0,kinds.indexOf(afterKind) + 1);
     for (let offset = 0; offset < kinds.length; offset++) {
       const kind = kinds[(start + offset) % kinds.length];
-      const record = await queuedDetail(database, 'detailKindQueue', [account,kind]);
+      const record = await queuedDetail(database, 'detailKindQueue', [account,kind],includeWaiting);
       if (record) return record;
     }
     return null;
   }
-  return queuedDetail(database, 'detailQueue', [account]);
+  return queuedDetail(database, 'detailQueue', [account],includeWaiting);
 }
 
 /** Preserve newest-first priority inside one section without decrypting skipped rows. */
-function queuedDetail(database, index, prefix) {
+function queuedDetail(database, index, prefix, includeWaiting) {
   return new Promise((resolve, reject) => {
     const cursor = database.transaction('records').objectStore('records').index(index)
       .openCursor(IDBKeyRange.bound([...prefix,0,-Infinity],[...prefix,1,Infinity]));
@@ -487,7 +491,9 @@ function queuedDetail(database, index, prefix) {
     cursor.onsuccess = () => {
       const item = cursor.result;
       if (!item) return resolve(null);
-      if (archiveRecordReadable(item.value) && item.value.detailUrl && item.value.nextDetailAt <= Date.now()) return resolve(openRecord(item.value));
+      const value = item.value;
+      const captured = value.detailAt && value.detailPriority === 1 && !value.detailCapture && !value.detailFailures;
+      if (!captured && archiveRecordReadable(value) && value.detailUrl && (includeWaiting || value.nextDetailAt <= Date.now())) return resolve(openRecord(value));
       item.continue();
     };
   });

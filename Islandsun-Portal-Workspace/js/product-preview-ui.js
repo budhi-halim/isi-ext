@@ -100,6 +100,8 @@ export function createProductPreviewUI({notify, repository, resolveRecord:record
     }
   }, { signal, capture: true });
   function enhance() {
+    const pageSize = Number(document.querySelector('[name="mytable_length"]')?.value);
+    if (pageSize > 0) repository.setPageSize?.(pageSize);
     if (sources && !document.querySelector('#select2-setsrf-results')) closeHover();
     // Wait for DataTables to establish its current page before prefetching.
     const records = [];

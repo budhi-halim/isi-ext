@@ -4,6 +4,13 @@ import { createNoticeMotion } from '../assets/family/js/notice-motion.js';
 import { UPDATE_PAGE } from './shared/update-logic.js';
 import { notificationTone } from './submission-logic.js';
 import { createTrayClearMotion } from './tray-clear-motion.js';
+import { submissionRecord } from './submission-logic.js';
+
+function destination(item) {
+  if (item.type === 'update' && item.url === UPDATE_PAGE) return UPDATE_PAGE;
+  const [kind,id] = String(item.key || '').split(':');
+  return submissionRecord({kind,id,number:item.number || 'Notification',url:item.url})?.url;
+}
 
 export function createNotificationCenter(store, notices) {
   const target = document.querySelector('.navbar-custom-menu');
@@ -120,12 +127,12 @@ export function createNotificationCenter(store, notices) {
       row.dataset.noticeId = item.id;
       row.dataset.tone = notificationTone(item.type);
       const mark = icon(row.dataset.tone === 'warning' ? 'clock' : 'check'); mark.classList.add('isi-notice-mark');
-      const content = document.createElement('div'), text = document.createElement('p'), time = document.createElement('time');
+      const href = destination(item);
+      const content = document.createElement(href ? 'a' : 'div'), text = document.createElement('p'), time = document.createElement('time');
+      if (href) { content.href = href; content.className = 'isi-notification-link'; }
+      if (item.customer) { const customer = document.createElement('strong'); customer.className = 'isi-notification-customer'; customer.textContent = item.customer; content.append(customer); }
       text.textContent = item.message; time.dateTime = new Date(item.created).toISOString(); time.textContent = new Date(item.created).toLocaleString();
       content.append(text, time);
-      if (item.type === 'update' && item.url === UPDATE_PAGE) {
-        const link = document.createElement('a'); link.href = UPDATE_PAGE; link.textContent = 'View update'; link.target = '_blank'; link.rel = 'noopener'; content.append(link);
-      }
       const actions = document.createElement('div'); actions.className = 'isi-notice-actions';
       if (item.muteKey) actions.append(iconButton('mute', 'Never remind me again', () => mute(item)));
       actions.append(iconButton('close', 'Dismiss notification', () => dismiss(item.id))); row.append(mark, content, actions); list.append(row);
@@ -147,6 +154,7 @@ export function createNotificationCenter(store, notices) {
       if (item.delivered || scheduled.has(item.id)) continue;
       scheduled.add(item.id);
       const accepted = notices.notify(item.message, {
+        href:destination(item), customer:item.customer,
         key: item.id, tone: notificationTone(item.type), onDismiss: () => dismiss(item.id), onMute: item.muteKey ? () => mute(item) : undefined,
         beforeShow: () => store.claim(item.id), isCurrent: () => Boolean(store.read().notices[item.id]),
         onSkip: () => { scheduled.delete(item.id); store.release(item.id).catch(reportError); },

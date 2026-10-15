@@ -5,6 +5,7 @@ startUpdateService({ key: 'workspace', discoverFamily: true });
 import { startDownloadService } from './shared/download-service.js';
 import { startReadGate } from './read-gate.js';
 import { startProductSessionService } from './product-session-store.js';
+import { startTirDocumentService } from './tir-document-service.js';
 import { startConnectionDiagnostics } from './connection-diagnostics.js';
 import { startSessionKeepAlive } from './session-keepalive.js';
 import { startOfflineService } from './offline-service.js';
@@ -26,6 +27,7 @@ startSessionKeepAlive(readGate, connectionDiagnostics, debugCapture);
 const offlineService = startOfflineService(readGate, connectionDiagnostics, debugCapture);
 startOfflineFallback(chrome,{onUnavailable:offlineService.unavailable});
 startProductSessionService();
+startTirDocumentService();
 
 const locks = new Map();
 chrome.runtime.onConnect.addListener(port => {

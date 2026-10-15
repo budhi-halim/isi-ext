@@ -4,6 +4,9 @@ import { portalPath, saveContract, sameSavedFields, sameSavedRecord } from './sa
 import { saveFieldSnapshot } from './save-field-snapshot.js';
 import { sampleProductSnapshot } from './sample-save-snapshot.js';
 import { createRequestProgress } from './request-progress.js';
+import { holdForegroundAction } from './foreground-action.js';
+import { diagnosticLog } from './diagnostic-log.js';
+import { handlerId, sampleType, requestDetailUrl } from './logic.js';
 
 /** Own one native save response without rebuilding the user's working form. */
 export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, onSubmission, onSaved }) {
@@ -24,8 +27,15 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
   const choices = document.createElement('div'); choices.className = 'isi-save-choices';
   const actions = document.createElement('div'); actions.className = 'isi-dialog-actions';
   dialog.append(title, message, progress, choices, actions);
-  let state = 'prepared', disposed = false, observer, timer, checkTimer, verificationTimer, lastDocument, savedUrl;
-  let committed = false, selected = false, submitted = false;
+  let state = 'prepared', disposed = false, observer, timer, checkTimer, verificationTimer, pollTimer, lastDocument, savedUrl, releaseAction;
+  const trace = (event,fields={}) => diagnosticLog(event,{kind:pending.kind,number:pending.number,state,...fields});
+  function poll() {
+    clearTimeout(pollTimer);
+    if (disposed || state === 'finished') return;
+    inspect();
+    if (!disposed && state !== 'finished') pollTimer = setTimeout(poll,250);
+  }
+  let committed = false, selected = false, submitted = false, awaitingDocument;
   function restoreTarget() {
     if (originalTarget === null) form.removeAttribute('target'); else form.setAttribute('target', originalTarget);
     for (const [node, value] of overrides) if (node.isConnected) node.setAttribute('formtarget', value);
@@ -37,7 +47,9 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
   function navigate(url) { if (!disposed) location.assign(url); }
   function finish(text, success = false) {
     if (disposed || state === 'finished') return;
-    state = 'finished'; clearTimeout(timer); clearTimeout(checkTimer); clearTimeout(verificationTimer); observer?.disconnect(); restoreTarget();
+    trace('submission-finished',{success,message:text,url:savedUrl});
+    state = 'finished'; clearTimeout(timer); clearTimeout(checkTimer); clearTimeout(verificationTimer); clearTimeout(pollTimer); observer?.disconnect(); restoreTarget();
+    releaseAction?.(); releaseAction = null;
     frame.removeEventListener('load', inspect); frame.remove();
     progress.hidden = true; choices.replaceChildren(); message.textContent = text;
     dialog.dataset.state = success ? 'success' : 'attention';
@@ -65,6 +77,7 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
         selected = true; pending.id = id; pending.number = row.cells[1].textContent.trim();
         state = 'verifying'; progress.hidden = false; choices.replaceChildren();
         message.textContent = 'Checking the selected TIR…'; resetDeadline();
+        awaitingDocument = doc;
         frame.src = new URL(`/islandsun/master/Tir/edit/${id}`, location.origin).href;
       });
       items.push(button);
@@ -82,9 +95,12 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     let doc, href;
     try { doc = frame.contentDocument; href = frame.contentWindow.location.href; }
     catch { finish('The returned page could not be read. Check the saved request before trying again.'); return; }
-    if (!doc || href === 'about:blank') return;
+    if (!doc || href === 'about:blank' || doc === awaitingDocument || ['selecting','review'].includes(state)) return;
+    awaitingDocument = undefined;
+    if (doc.readyState === 'loading') return;
     if (doc !== lastDocument) {
       lastDocument = doc; observer?.disconnect();
+      trace('submission-response',{url:href,readyState:doc.readyState});
       observer = new MutationObserver(() => { clearTimeout(checkTimer); checkTimer = setTimeout(inspect, 100); });
       observer.observe(doc, {childList:true, subtree:true, attributes:true, characterData:true});
     }
@@ -100,10 +116,23 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     if (returnedAccount && returnedAccount !== pending.account) { finish('The signed-in account changed. Nothing further will be submitted.'); return; }
     const record = pageSubmissionRecord(doc, href);
     if (!record) {
+      if (pending.kind === 'sample' && portalPath(new URL(href).pathname) === '/islandsun/samplerequest' && returnedAccount === pending.account && state !== 'locating') {
+        const matches = [...doc.querySelectorAll('#mytable tbody tr')].filter(row => [...row.cells].some(cell => cell.textContent.trim() === pending.number));
+        if (matches.length === 1) {
+          const row = matches[0];
+          const id = [...row.querySelectorAll('[onclick]')].map(node => handlerId(node.getAttribute('onclick'),'detailData')).find(Boolean);
+          const type = [...row.cells].map(cell => sampleType(cell.textContent)).find(Boolean);
+          const url = requestDetailUrl(id,type);
+          if (url && (!pending.id || pending.id === id)) {
+            state = 'locating'; observer?.disconnect(); trace('submission-located',{url}); awaitingDocument = doc; frame.src = url;
+          }
+        }
+      }
       if (pending.kind === 'tir' && portalPath(new URL(href).pathname) === '/islandsun/master/tir' && returnedAccount === pending.account) {
         if (!pending.id) chooseTir(doc);
         else if (savedUrl || pending.sourceUrl) {
           observer?.disconnect();
+          awaitingDocument = doc;
           frame.src = savedUrl || pending.sourceUrl;
         }
       }
@@ -124,7 +153,10 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     if (!savedForm || !active && !link || !sameSavedFields(pending.fields, actual)
       || pending.products && JSON.stringify(pending.products) !== JSON.stringify(products)) {
       message.textContent = 'Checking the saved fields and products…';
-      verificationTimer ??= setTimeout(() => finish('The saved request needs review. Nothing was submitted; check its values and use Submit when ready.'), 15000);
+      if (!verificationTimer) {
+        trace('submission-verification-pending',{hasForm:!!savedForm,hasSubmit:!!link,fields:Object.keys(pending.fields).filter(key => JSON.stringify(pending.fields[key]) !== JSON.stringify(actual?.[key])),productsMatch:!pending.products || JSON.stringify(pending.products) === JSON.stringify(products)});
+        verificationTimer = setTimeout(() => finish('The saved request needs review. Nothing was submitted; check its values and use Submit when ready.'), 15000);
+      }
       // Native Ajax may still be populating the returned form; observe it within the same deadline.
       return;
     }
@@ -134,12 +166,13 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     const submit = () => {
       if (disposed || submitted || state === 'finished') return;
       submitted = true; state = 'submitting'; actions.replaceChildren(); choices.replaceChildren(); progress.hidden = false;
+      trace('submission-start',{url:link.href});
       message.textContent = `Submitting ${record.number} to Product Marketing…`;
       try { Promise.resolve(onSubmission?.(submissionIntent(link.href, href, record.number))).catch(() => {}); }
       catch { /* Notification tracking must not alter an authorized submission. */ }
       resetDeadline(); observer?.disconnect();
       // The exact native link is verified against this record; the user's Save & Submit authorizes it.
-      frame.src = link.href;
+      awaitingDocument = doc; frame.src = link.href;
     };
     if (selected) {
       clearTimeout(timer);
@@ -157,14 +190,17 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     commit() {
       if (disposed || committed) return;
       committed = true; state = 'saving'; message.textContent = 'Saving the request…';
+      releaseAction = holdForegroundAction('save-and-submit'); trace('submission-save-start');
       pending.fields = saveFieldSnapshot(form, pending.kind);
       if (!dialog.open) dialog.showModal(); resetDeadline(); onCommitted?.();
+      pollTimer = setTimeout(poll,250);
     },
     get committed() { return committed; },
     stop(message) { if (committed) finish(message); else this.destroy(); },
     destroy() {
       if (disposed) return;
-      disposed = true; clearTimeout(timer); clearTimeout(checkTimer); clearTimeout(verificationTimer); observer?.disconnect(); restoreTarget();
+      disposed = true; clearTimeout(timer); clearTimeout(checkTimer); clearTimeout(verificationTimer); clearTimeout(pollTimer); observer?.disconnect(); restoreTarget();
+      releaseAction?.(); releaseAction = null;
       frame.removeEventListener('load', inspect); frame.remove(); dialog.close(); dialog.remove();
     },
   };

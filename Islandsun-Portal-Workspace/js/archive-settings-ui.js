@@ -26,8 +26,8 @@ export function initializeArchiveSettings(getAccount) {
     if (!getAccount() || busy || scope === 'account' && !info?.account) return;
     selection = {scope,account:info?.account};
     $('#archive-delete-description').textContent = scope === 'all'
-      ? 'Delete every account’s saved records and documents in this browser profile? This cannot be undone offline. Saving will pause until you turn it back on.'
-      : `Delete the saved copy for ${info.name || info.account}? Other accounts keep their copies, including any shared files they use. Saving will pause until you turn it back on.`;
+      ? 'Delete every account’s saved records and documents in this browser profile? This cannot be undone offline. Your saving settings stay unchanged; enabled saving rebuilds the copy automatically.'
+      : `Delete the saved copy for ${info.name || info.account}? Other accounts keep their copies, including any shared files they use. Your saving settings stay unchanged; enabled saving rebuilds the copy automatically.`;
     dialog.showModal();
   }
   $('#clear-account-archive').addEventListener('click',() => ask('account'));
@@ -42,7 +42,7 @@ export function initializeArchiveSettings(getAccount) {
     try {
       const response = await chrome.runtime.sendMessage({type:'offline-clear',...chosen});
       if (!response?.ok) throw new Error(response?.error || 'The saved copy could not be deleted. Try again.');
-      message.textContent = 'Saved copy deleted. Offline saving is paused.';
+      message.textContent = 'Saved copy deleted. Your saving settings are unchanged. If enabled, saving restarts automatically.';
     } catch (error) { message.textContent = error.message; }
     finally { busy = false; await refresh(); }
   });

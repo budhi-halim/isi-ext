@@ -1,5 +1,5 @@
 /** Refresh a bounded working set without overlapping passes or retaining obsolete pages. */
-export function createProductPrefetch(cache, { interval = 30000, limit = 100 } = {}) {
+export function createProductPrefetch(cache, { interval = 300000, limit = 100 } = {}) {
   let urls = [], signature = '', controller, timer, disposed = false;
   async function run() {
     clearTimeout(timer);
@@ -9,7 +9,7 @@ export function createProductPrefetch(cache, { interval = 30000, limit = 100 } =
     try {
       for (const url of urls) {
         if (current.signal.aborted) break;
-        try { await cache.get(url, { signal: current.signal, priority: true }); }
+        try { await cache.get(url, { signal: current.signal, priority: true, purpose:'visible' }); }
         catch (error) { if (error.name === 'AbortError') break; }
       }
     } finally {

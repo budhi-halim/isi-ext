@@ -6,6 +6,7 @@ import { OFFLINE_STATUS, OFFLINE_SOURCES } from './offline-config.js';
 import { readArchive } from './offline-store.js';
 import { initializeArchiveSettings } from './archive-settings-ui.js';
 import { readAccountSettings, requestAccountSettings, accountSettingsChanged } from './account-settings.js';
+import { journalExport } from './diagnostic-journal-store.js';
 initializeUpdatePopup('workspace', {discoverFamily:true});
 initializeTheme();
 const $ = selector => document.querySelector(selector);
@@ -87,3 +88,22 @@ $('#copy-diagnostics').addEventListener('click',async event => {
   finally { button.disabled = false; }
 });
 render();
+
+$('#download-diagnostic-log').addEventListener('click', async event => {
+  const button = event.currentTarget, message = $('#diagnostics-status');
+  if (button.disabled || !account) return;
+  button.disabled = true; message.textContent = 'Preparing the activity log…';
+  const owner = account;
+  let url;
+  try {
+    const settings = await readAccountSettings();
+    const saved = await chrome.storage.local.get([OFFLINE_STATUS,'islandsun.journal-error']);
+    const sources = await Promise.all(Object.keys(OFFLINE_SOURCES).map(async kind => diagnosticArchiveSource(kind,await readArchive('meta',`index:${owner}:${kind}`))));
+    const blob = await journalExport(owner,{settings,archive:saved[OFFLINE_STATUS],sources,logError:saved['islandsun.journal-error']});
+    if ((await readAccountSettings()).account !== owner) throw new Error('The account changed. Reopen settings.');
+    url = URL.createObjectURL(blob);
+    await chrome.downloads.download({url,filename:`islandsun-activity-${new Date().toISOString().replaceAll(':','-')}.json`,saveAs:false});
+    message.textContent = 'Activity log downloaded. Logging continues automatically.';
+  } catch (error) { message.textContent = error.message || 'The activity log could not be downloaded.'; }
+  finally { button.disabled = false; if (url) setTimeout(()=>URL.revokeObjectURL(url),60000); }
+});

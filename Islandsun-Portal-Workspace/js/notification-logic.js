@@ -15,25 +15,47 @@ export function calendarDay(value) {
 
 export function emptyNotificationState() { return { version: 1, jobs: {}, notices: {}, muted: {} }; }
 
+function noticeChannel(item) { return `${item.key}:${item.type}:${item.documentId || item.muteKey || ''}`; }
+
+export function acknowledgeNotices(state, items) {
+  state.acknowledged ||= {};
+  for (const item of items) state.acknowledged[noticeChannel(item)] = {id:item.id,at:Date.now()};
+  const oldest = Object.entries(state.acknowledged).sort((a,b)=>a[1].at-b[1].at);
+  for (const [key] of oldest.slice(0,Math.max(0,oldest.length-5000))) delete state.acknowledged[key];
+  return state;
+}
+
 /** Apply one verified record snapshot. Failed/missing snapshots never imply completion. */
 export function observeRecord(previous, record, { now = Date.now(), today = new Date().toLocaleDateString('en-CA') } = {}) {
   const state = structuredClone(previous);
   const key = `${record.kind}:${record.id}`;
   const known = state.jobs[key];
   const notify = (id, message, extra = {}) => {
-    if (!state.notices[id]) state.notices[id] = { id, key, message, created: now, url: record.url, ...extra };
+    const item = { id, key, number:record.number, message, created: now, url: record.url, customer:record.customer || '', ...extra };
+    if (state.acknowledged?.[noticeChannel(item)]?.id === id) return;
+    if (!state.notices[id]) state.notices[id] = item;
   };
   const day = calendarDay(today), start = calendarDay(record.date);
   const elapsed = day !== null && start !== null ? Math.max(0, day - start) : 0;
   const week = Math.floor(elapsed / 7);
   const pending = {};
   if (record.kind === 'tir') {
-    if (!monitorDetailsEligible(record)) return state;
+    if (record.status != null && !monitorDetailsEligible(record)) return state;
     if (!record.documents?.length) return state;
     for (const document of record.documents) {
       const documentKey = String(document.id);
       const muteKey = `${key}:${documentKey}`;
       const tracked = known?.pending[documentKey];
+      if (document.hash) {
+        state.documentVersions ||= {};
+        const versionKey = `${key}:${documentKey}`;
+        const previousVersion = state.documentVersions[versionKey];
+        if (previousVersion && previousVersion !== document.hash) {
+          for (const [id,notice] of Object.entries(state.notices)) if (notice.key === key && (notice.type === 'complete' || notice.documentId === documentKey)) delete state.notices[id];
+          notify(`${versionKey}:changed:${document.hash}`,`${record.number}: ${document.label} was replaced.`,{type:'document-changed',documentId:documentKey});
+        }
+        state.documentVersions[versionKey] = document.hash;
+      }
       if (document.ready) {
         if (tracked) notify(`${key}:${documentKey}:ready`, `${record.number}: ${document.label} is ready.`, { type: 'ready', documentId: documentKey });
         continue;
@@ -50,6 +72,7 @@ export function observeRecord(previous, record, { now = Date.now(), today = new 
     }
     if (known && Object.keys(known.pending).length && !Object.keys(pending).length) notify(`${key}:complete`, `${record.number}: all documents are ready.`, { type: 'complete' });
   } else if (record.kind === 'sample') {
+    if (record.status != null && !monitorDetailsEligible(record)) return state;
     if (!Number.isInteger(record.requestedCount) || record.requestedCount < 1 || !Number.isInteger(record.providedCount)) return state;
     if (record.requestedCount !== record.providedCount) {
       const lastWeek = known?.pending.sample?.lastWeek || 0;
@@ -69,6 +92,7 @@ export function observeRecord(previous, record, { now = Date.now(), today = new 
 export function dismissNotification(previous, id, mute = false) {
   const state = structuredClone(previous);
   const item = state.notices[id];
+  if (item) acknowledgeNotices(state,[item]);
   if (mute && item?.muteKey) {
     state.muted[item.muteKey] = true;
     for (const [key, notice] of Object.entries(state.notices)) if (notice.muteKey === item.muteKey) delete state.notices[key];

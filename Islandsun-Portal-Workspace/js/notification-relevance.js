@@ -24,6 +24,8 @@ export function pruneNotificationState(state) {
       if (!pending || pending[subject] || latestWarnings.has(notice.key)) delete state.notices[id];
     } else if (notice.type === 'complete') {
       if ((pending && Object.keys(pending).length) || latestWarnings.has(notice.key)) delete state.notices[id];
+    } else if (notice.type === 'document-changed') {
+      if (pending?.[notice.documentId] || latestWarnings.has(notice.key)) delete state.notices[id];
     } else if (SUBMISSION_WARNINGS.has(notice.type)) {
       if (latestWarnings.get(notice.key) !== notice || state.submissions?.[notice.key]?.confirmed) delete state.notices[id];
     }

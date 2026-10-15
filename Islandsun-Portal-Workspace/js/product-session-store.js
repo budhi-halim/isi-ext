@@ -1,8 +1,11 @@
 import { PORTAL_ORIGIN } from './shared/document-names.js';
 import { isTirSourceUrl } from './tir-source-logic.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
+import { recordKind } from './fetch-policy.js';
 
 const PREFIX = 'islandsun.product-cache.';
+let serviceStore;
+export async function clearProductSessions(account = null) { await serviceStore?.clear(account); }
 
 function validUrl(value) {
   try {
@@ -59,6 +62,11 @@ export function createProductSessionStore(storage, { maxEntries = 300, maxBytes 
     }
   }
   return {
+    clear(account = null) { return serialized(async () => {
+      const removed = [...entries].filter(([,item]) => account === null || item.record.account === account);
+      await storage.remove(removed.map(([key]) => key));
+      for (const [key,item] of removed) { entries.delete(key); bytes -= item.size; }
+    }); },
     read(account) { return serialized(() => [...entries.values()].filter(item => item.record.account === account).map(item => item.record)); },
     write(record) {
       return serialized(async () => {
@@ -72,6 +80,13 @@ export function createProductSessionStore(storage, { maxEntries = 300, maxBytes 
         await storage.set({ [key]: record });
         if (previous) { entries.delete(key); bytes -= previous.size; }
         entries.set(key, { record, size }); bytes += size;
+        const limit = Math.max(5,Math.min(100,Number(record.pageSize) || 10)) * 3;
+        const sameKind = [...entries].filter(([,item]) => item.record.account === record.account && recordKind(item.record.url) === recordKind(record.url));
+        const excess = sameKind.sort((a,b) => a[1].record.fetched - b[1].record.fetched).slice(0,Math.max(0,sameKind.length-limit));
+        if (excess.length) {
+          await storage.remove(excess.map(([key]) => key));
+          for (const [key,item] of excess) { entries.delete(key); bytes -= item.size; }
+        }
         return true;
       });
     }
@@ -80,6 +95,7 @@ export function createProductSessionStore(storage, { maxEntries = 300, maxBytes 
 
 export function startProductSessionService() {
   const store = createProductSessionStore(chrome.storage.session);
+  serviceStore = store;
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!['product-cache-read', 'product-cache-write'].includes(message?.type)) return;
     try { if (new URL(sender.url).origin !== PORTAL_ORIGIN) return; } catch { return; }
@@ -87,6 +103,9 @@ export function startProductSessionService() {
     const operation = (async () => {
       const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
       if (scope && scope.account !== message.account) throw new Error('The signed-in account changed.');
+      const reset = (await chrome.storage.local.get('islandsun.archive-reset'))['islandsun.archive-reset'];
+      if (message.type === 'product-cache-write' && reset && (!reset.account || reset.account === message.account)
+        && (reset.clearing || (message.record?.startedAt || message.record?.fetched || 0) <= reset.at)) return false;
       const value = message.type === 'product-cache-read' ? await store.read(message.account) : await store.write({ ...message.record, account: message.account });
       const current = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
       if (current && current.account !== message.account) throw new Error('The signed-in account changed.');

@@ -4,9 +4,16 @@ import { watchPortalNavigation } from './navigation-readiness.js';
 import { safeRequestUrl } from './debug-capture-data.js';
 import { createArchivePacing } from './archive-pacing.js';
 import { OFFLINE_STATUS } from './offline-config.js';
+import { readPriority, SOURCE_ORDER } from './fetch-policy.js';
 
 function recoveryDelay(elapsed) {
   return elapsed >= 4000 ? Math.min(10000, elapsed) : 250;
+}
+
+function editorSafeArchive(kind) { return kind === 'archive-identity' || /^archive-[a-z-]+-(?:index|document)$/.test(kind); }
+function listReader(url) {
+  try { const target = new URL(url); return target.origin === PORTAL_ORIGIN && /^\/islandsun\/(?:samplerequest|master\/tir)\/json$/i.test(target.pathname); }
+  catch { return false; }
 }
 
 /** Share a single paced read lane across all portal tabs, leaving navigation connections free. */
@@ -15,6 +22,9 @@ export function startReadGate({onEvent = () => {}} = {}) {
   const queue = [];
   const editors = new Set();
   const tables = new Set();
+  const interactions = new Map(), actions = new Set();
+  const availableListeners = new Set();
+  const interacting = () => [...interactions.values()].some(until => until > Date.now());
   let current, timer, availableAt = 0, archiveAvailableAt = 0;
   let failures = 0, cooldownUntil = 0;
   let portalOffline = false, connectionRevision = 0;
@@ -61,13 +71,23 @@ export function startReadGate({onEvent = () => {}} = {}) {
 
   function pump() {
     clearTimeout(timer);
-    if (!restored || current || !queue.length) return;
+    if (!restored || current) return;
+    if (!queue.length) {
+      const held = archiveWait();
+      if (!held) { for (const listener of availableListeners) listener(); }
+      else if (held.until > Date.now()) timer = setTimeout(pump,held.until-Date.now());
+      return;
+    }
     if (portalOffline) { for (const job of queue.splice(0)) pause(job); return; }
     const nativeTable = queue[0].nativeTable;
     const recoveryProbe = nativeTable && queue[0].kind !== 'sales-row-lookup';
     if (navigation.pendingRequest()) return;
     // A page may wait for its initial table before completing navigation.
-    if (!nativeTable && (navigation.busy() || tables.size)) return;
+    if (!nativeTable && (navigation.busy() || tables.size || actions.size)) return;
+    if (!nativeTable && interacting() && !['hover','visible'].includes(queue[0].purpose)) {
+      timer = setTimeout(pump, Math.max(1, Math.min(...[...interactions.values()].filter(until => until > Date.now())) - Date.now()));
+      return;
+    }
     if (!recoveryProbe && cooldownUntil > Date.now()) {
       for (const job of queue.splice(0)) {
         try { job.port.postMessage({cooldownUntil}); } catch { /* The port may have closed during navigation. */ }
@@ -82,14 +102,26 @@ export function startReadGate({onEvent = () => {}} = {}) {
     emit('queue-granted',{queueId:job.id,priority:job.priority,queueMs:job.started-job.queuedAt,remaining:queue.length});
     try {
       job.port.postMessage({ granted: true });
-      job.expiry = setTimeout(() => { recordResult(true); job.close(); }, nativeTable ? 60000 : 30000);
+      job.expiry = setTimeout(() => { recordResult(true); job.close(); }, nativeTable ? 60000 : 120000);
     } catch { job.close(); }
   }
 
   chrome.runtime.onConnect.addListener(port => {
-    if (!['islandsun-read-gate', 'islandsun-editor-guard','islandsun-table-guard','islandsun-table-read'].includes(port.name)) return;
+    if (!['islandsun-read-gate', 'islandsun-editor-guard','islandsun-table-guard','islandsun-table-read','islandsun-interaction-guard','islandsun-action-guard'].includes(port.name)) return;
     try { if (new URL(port.sender?.url).origin !== PORTAL_ORIGIN) return port.disconnect(); }
     catch { return port.disconnect(); }
+    if (port.name === 'islandsun-interaction-guard' || port.name === 'islandsun-action-guard') {
+      const action = port.name === 'islandsun-action-guard';
+      if (action) actions.add(port); else interactions.set(port,Date.now() + 60000);
+      emit('foreground-busy',{kind:action ? 'saving-or-submitting' : 'search-or-request-selector'});
+      port.onMessage.addListener(message => {
+        if (!action) interactions.set(port,Math.min(Date.now() + 60000,Number(message?.until) || 0));
+        pump();
+      });
+      try { current?.port?.postMessage({yield:true}); } catch { /* The active response keeps its permit until completion. */ }
+      port.onDisconnect.addListener(() => { actions.delete(port); interactions.delete(port); emit('foreground-settled',{kind:action?'action':'interaction'}); pump(); });
+      pump(); return;
+    }
     if (port.name === 'islandsun-table-guard') {
       tables.add(port);
       emit('foreground-busy',{kind:'native-ajax-or-table',count:tables.size});
@@ -101,7 +133,8 @@ export function startReadGate({onEvent = () => {}} = {}) {
     if (port.name === 'islandsun-editor-guard') {
       editors.add(port);
       port.onDisconnect.addListener(() => { editors.delete(port); pump(); });
-      for (const job of [current, ...queue].filter(Boolean)) {
+      try { current?.port?.postMessage({yield:true}); } catch { /* Let the current HTTP response finish. */ }
+      for (const job of [...queue]) {
         if (!job.editorLookup && !job.nativeTable) pause(job);
       }
       return;
@@ -137,18 +170,31 @@ export function startReadGate({onEvent = () => {}} = {}) {
         }
         return;
       }
-      job.editorLookup = isTirSourceUrl(message?.editorLookup)
+      job.editorLookup = listReader(message?.url) || isTirSourceUrl(message?.editorLookup)
         && /^\/islandsun\/(?:index\.php\/)?master\/tir\/(?:create|edit\/\d+)\/?$/i.test(new URL(port.sender.url).pathname);
       if (editors.size && !job.editorLookup && !job.nativeTable) { pause(job); return; }
       if (job.queued || message?.type !== 'read' || queue.length >= 384) { job.close(); return; }
-      job.kind = job.nativeTable ? message.kind === 'sales-row-lookup' ? 'sales-row-lookup' : 'native-table' : 'preview';
-      job.queued = true; job.priority = job.nativeTable ? job.kind === 'native-table' ? 3 : 2 : message.priority === true ? 1 : 0;
-      job.queuedAt=Date.now();
-      emit('queue-enqueued',{queueId:job.id,kind:job.kind,priority:job.priority,tabId:port.sender?.tab?.id,wait:archiveWait()});
+      job.kind = job.nativeTable ? message.kind === 'sales-row-lookup' ? 'sales-row-lookup' : 'native-table' : SOURCE_ORDER.includes(message.kind) ? message.kind : 'preview';
+      job.purpose = job.nativeTable ? 'native' : ['hover','visible','warmup','notification','archive'].includes(message.purpose) ? message.purpose : message.priority === true ? 'hover' : 'notification';
+      job.queued = true; job.priority = job.nativeTable ? job.kind === 'native-table' ? 700 : 600 : readPriority(job.purpose,job.kind);
+      job.queuedAt=Date.now(); job.url = safeRequestUrl(message.url);
+      emit('queue-enqueued',{queueId:job.id,kind:job.kind,purpose:job.purpose,url:safeRequestUrl(message.url),priority:job.priority,tabId:port.sender?.tab?.id,wait:archiveWait()});
       const index = queue.findIndex(item => item.priority < job.priority);
       if (index < 0) queue.push(job); else queue.splice(index, 0, job);
       pump();
     });
+  });
+
+  chrome.runtime.onMessage?.addListener((message,sender) => {
+    if (message?.type !== 'portal-read-promote' || !['hover','visible'].includes(message.purpose)) return;
+    try { if (new URL(sender.url).origin !== PORTAL_ORIGIN || new URL(message.url).origin !== PORTAL_ORIGIN) return; }
+    catch { return; }
+    const url = safeRequestUrl(message.url);
+    for (const job of queue) if (job.url === url && !job.nativeTable) {
+      const priority = readPriority(message.purpose,job.kind);
+      if (priority > job.priority) { job.purpose = message.purpose; job.priority = priority; emit('queue-promoted',{queueId:job.id,purpose:job.purpose}); }
+    }
+    queue.sort((a,b) => b.priority-a.priority); pump();
   });
 
   function pause(job) {
@@ -162,6 +208,8 @@ export function startReadGate({onEvent = () => {}} = {}) {
     if (portalOffline) return {reason:'offline'};
     if (navigation.busy()) return {reason:'navigation'};
     if (tables.size) return {reason:'table'};
+    if (actions.size) return {reason:'action'};
+    if (interacting()) return {reason:'interaction',until:Math.max(...interactions.values())};
     if (navigation.settledAt() > Date.now()) return {reason:'settling',until:navigation.settledAt()};
     if (editors.size) return {reason:'editor'};
     if (cooldownUntil > Date.now()) return {reason:'recovery',until:cooldownUntil};
@@ -171,6 +219,7 @@ export function startReadGate({onEvent = () => {}} = {}) {
     return null;
   }
   return {
+    onAvailable(listener) { availableListeners.add(listener); return () => availableListeners.delete(listener); },
     archiveWait,
     isPortalOffline: () => portalOffline,
     setPortalOffline(value) {
@@ -184,12 +233,12 @@ export function startReadGate({onEvent = () => {}} = {}) {
       pump();
     },
     archivePacing: () => pacing.state(),
-    archivePaused: (connectionProbe = false) => portalOffline && !connectionProbe || navigation.busy() || navigation.settledAt() > Date.now() || editors.size > 0 && !connectionProbe || tables.size > 0,
-    /** Archive reads yield to foreground work and are aborted as soon as an editor opens. */
+    archivePaused: (connectionProbe = false, kind = '') => portalOffline && !connectionProbe || navigation.busy() || navigation.settledAt() > Date.now() || editors.size > 0 && !connectionProbe && !editorSafeArchive(kind) || tables.size > 0 || actions.size > 0 || interacting(),
+    /** Each HTTP response finishes before optional work yields to foreground actions. */
     async runArchiveRead(read, kind = 'archive') {
       if (portalOffline && kind !== 'archive-identity') return {deferred:true};
       const connectionProbe = portalOffline && kind === 'archive-identity';
-      if (!restored || navigation.busy() || navigation.settledAt() > Date.now() || current || queue.length || editors.size && !connectionProbe || tables.size || cooldownUntil > Date.now()) return {deferred:true};
+      if (!restored || navigation.busy() || navigation.settledAt() > Date.now() || current || queue.length || editors.size && !editorSafeArchive(kind) || tables.size || actions.size || interacting() || cooldownUntil > Date.now()) return {deferred:true};
       if (Math.max(availableAt,archiveAvailableAt) > Date.now()) return {deferred:true,retryAfterMs:Math.max(availableAt,archiveAvailableAt)-Date.now()};
       const controller = new AbortController();
       const job = {kind:/^archive(?:-[a-z-]+)?$/.test(kind) ? kind : 'archive',started:Date.now(), cancel:() => controller.abort(), editorLookup:connectionProbe};
@@ -199,7 +248,7 @@ export function startReadGate({onEvent = () => {}} = {}) {
         // Persist ownership before starting server work so a crash cannot trigger an immediate retry.
         if (storage) await persistHealth(Date.now() + 120000);
         controller.signal.throwIfAborted();
-        if (navigation.busy() || tables.size || queue.length) { interrupted = true; return {deferred:true}; }
+        if (navigation.busy() || tables.size || actions.size || interacting() || queue.length) { interrupted = true; return {deferred:true}; }
         const result = await read(controller.signal);
         controller.signal.throwIfAborted();
         recordResult(false);
@@ -225,7 +274,7 @@ export function startReadGate({onEvent = () => {}} = {}) {
     // The protected home check reads no record-specific editor/cart route.
     async runSessionCheck(check) {
       if (portalOffline) return {deferred:true};
-      if (!restored || navigation.busy() || navigation.settledAt() > Date.now() || current || queue.length || tables.size || cooldownUntil > Date.now() || availableAt > Date.now()) return { deferred: true };
+      if (!restored || navigation.busy() || navigation.settledAt() > Date.now() || current || queue.length || tables.size || actions.size || interacting() || cooldownUntil > Date.now() || availableAt > Date.now()) return { deferred: true };
       const job = { kind:'keepalive', editorLookup: true, started: Date.now() };
       current = job;
       emit('session-check-start');

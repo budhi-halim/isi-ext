@@ -7,10 +7,10 @@ async function send(message) {
 }
 
 /** Observe existing isolated-world lookups without moving their fetch or changing its credentials. */
-export async function capturePortalFetch(url, options, kind) {
+export async function capturePortalFetch(url, options, kind, timeoutMs = 25000) {
   const capture = await send({type:'debug-portal-start',kind,request:{
     url:safeRequestUrl(String(url)),method:options.method || 'GET',body:safeRequestBody(options.body),
-    credentials:options.credentials,redirect:options.redirect,timeoutMs:10000,
+    credentials:options.credentials,redirect:options.redirect,timeoutMs,
   }});
   activeUntil = capture?.expiresAt || 0;
   if (!capture?.attemptId) return fetch(url,options);

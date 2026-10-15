@@ -2,7 +2,7 @@
   "schema": 1,
   "extensions": {
     "workspace": {
-      "version": "1.4.60"
+      "version": "1.4.61"
     },
     "revenue": {
       "version": "1.1.7"

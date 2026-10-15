@@ -8,11 +8,11 @@ import { recordPortalProcessing } from './debug-capture-client.js';
 const detailSources = new WeakMap();
 
 /** Read a detail page without executing any of its scripts or loading its frames. */
-export async function readDetail(url, signal, { priority = false, readText = readPortalText } = {}) {
+export async function readDetail(url, signal, { priority = false, purpose, readText = readPortalText } = {}) {
   const parsed = portalUrl(url);
   if (!parsed || !/^\/islandsun\/(?:master\/tir\/edit\/\d+|samplerequest\/edit)$/i.test(parsed.pathname)) throw new Error('This record link is unavailable.');
   const observedAt = Date.now();
-  const html = await readText(parsed.href, { signal, priority, redirect: 'follow' });
+  const html = await readText(parsed.href, { signal, priority, purpose, redirect: 'follow' });
   const started = performance.now();
   const root = new DOMParser().parseFromString(html, 'text/html');
   recordPortalProcessing(url,'preview-dom-parse',performance.now()-started,root);
@@ -48,7 +48,7 @@ export function issuedProducts(root, splitCode = false) {
 
 /** The portal loads its separate product-code columns through this read-only lookup. */
 export async function readSampleProducts(url, signal, options) {
-  return withPortalRead(readText => readSampleRecord(url, signal, { ...options, readText }), { ...options, signal });
+  return withPortalRead(readText => readSampleRecord(url, signal, { ...options, readText }), { ...options, signal, url });
 }
 
 async function readSampleRecord(url, signal, { readText, priority }) {

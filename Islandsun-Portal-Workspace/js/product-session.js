@@ -1,4 +1,5 @@
 import { hasRequestedProducts, mergeProducts, splitIssuedProduct, splitRequestedProduct } from './product-logic.js';
+import { acquireLocalLock } from './local-lock.js';
 
 /** Session storage is accessed by the trusted worker, never exposed to page scripts. */
 export function productSession(account) {
@@ -9,6 +10,8 @@ export function productSession(account) {
     return result.value;
   }
   return {
+    get: async url => (await request('product-cache-read')).find(record => record.url === url),
+    lock: url => acquireLocalLock(`islandsun.portal.preview:${account}:${url}`,{timeoutMs:120000}),
     load: async () => (await request('product-cache-read')).map(record => {
       const url = new URL(record.url);
       if (!/\/samplerequest\/edit$/i.test(url.pathname) || !/^[2-5]$/.test(url.searchParams.get('srtype'))) return record;
