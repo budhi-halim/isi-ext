@@ -450,6 +450,7 @@ html:not([data-isi-boot="off"]) .main-header .user-menu > a { color: var(--isi-t
 [data-isi-portal="enabled"] .isi-notice-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 [data-isi-portal="enabled"] .isi-notification-bell { position: relative; border: 1px solid var(--isi-border); border-radius: var(--isi-control-radius); color: var(--isi-text); }
 [data-isi-portal="enabled"] .isi-notification-count { position: absolute; top: -8px; right: -8px; min-width: 18px; padding: 2px 4px; border-radius: 12px; background: var(--isi-primary); color: var(--isi-on-primary); font: 600 10px/1.4 var(--isi-font); }
+[data-isi-portal="enabled"] .isi-notification-count--update { top: auto; bottom: -8px; background: var(--isi-warning); color: var(--isi-on-primary); outline: 2px solid var(--isi-surface); }
 [data-isi-portal="enabled"] .isi-notification-entry { display: flex; align-items: start; gap: 16px; padding-block: 16px; border-bottom: 1px solid var(--isi-border); }
 [data-isi-portal="enabled"] .isi-notification-entry > div:not(.isi-notice-actions) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 [data-isi-portal="enabled"] .isi-notification-entry p { margin: 0 0 6px; }
@@ -516,7 +517,7 @@ html:not([data-isi-boot="off"]) .main-header .user-menu > a { color: var(--isi-t
 [data-isi-portal="enabled"] .isi-notification-header h2 { flex: 1; margin: 0; font-size: 15px; }
 [data-isi-portal="enabled"] .isi-notification-header [data-clear-notices] { min-height: 32px; padding: 5px 9px; font-size: 12px; }
 [data-isi-portal="enabled"] [data-notice-list] { padding: 8px; }
-[data-isi-portal="enabled"] .isi-notification-entry { --notice-color: var(--isi-success); display: flex; align-items: start; gap: 10px; padding: 12px; margin-bottom: 6px; border: 1px solid color-mix(in oklch,var(--notice-color) 24%,var(--isi-border)); border-radius: 10px; background: color-mix(in oklch,var(--notice-color) 6%,var(--isi-surface)); font-size: 13px; }
+[data-isi-portal="enabled"] .isi-notification-entry { --notice-color: var(--isi-success); position: relative; isolation: isolate; display: flex; align-items: start; gap: 10px; padding: 12px; margin-bottom: 6px; border: 1px solid color-mix(in oklch,var(--notice-color) 24%,var(--isi-border)); border-radius: 10px; background: color-mix(in oklch,var(--notice-color) 6%,var(--isi-surface)); font-size: 13px; }
 [data-isi-portal="enabled"] .isi-notification-entry[data-tone="warning"] { --notice-color: var(--isi-warning); }
 [data-isi-portal="enabled"] .isi-notice-mark { color: var(--notice-color); width: 20px; height: 20px; flex: none; margin-top: 2px; }
 [data-isi-portal="enabled"] .isi-notification-entry time { font-size: 11px; }

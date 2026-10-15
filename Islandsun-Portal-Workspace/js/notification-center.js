@@ -12,6 +12,10 @@ function destination(item) {
   return submissionRecord({kind,id,number:item.number || 'Notification',url:item.url})?.url;
 }
 
+function orderedNotices(state) {
+  return Object.values(state.notices).sort((a, b) => Number(b.type === 'update') - Number(a.type === 'update') || a.created - b.created || a.id.localeCompare(b.id));
+}
+
 export function createNotificationCenter(store, notices) {
   const target = document.querySelector('.navbar-custom-menu');
   if (!target) return { destroy() {} };
@@ -26,6 +30,8 @@ export function createNotificationCenter(store, notices) {
   button.dataset.isiOwned = ''; button.classList.add('isi-notification-bell');
   button.setAttribute('aria-haspopup', 'dialog'); button.setAttribute('aria-expanded', 'false');
   const badge = document.createElement('span'); badge.className = 'isi-notification-count'; button.append(badge);
+  const updateBadge = document.createElement('span'); updateBadge.className = 'isi-notification-count isi-notification-count--update'; button.append(updateBadge);
+  badge.setAttribute('aria-hidden', 'true'); updateBadge.setAttribute('aria-hidden', 'true');
   target.insertBefore(button, document.querySelector('#isi-portal-theme'));
   const reportError = () => notices.notify('Notification history could not be saved. Please try again.', { error: true });
   function dismiss(id) { store.dismiss(id).catch(reportError); }
@@ -82,8 +88,8 @@ export function createNotificationCenter(store, notices) {
 
   function renderDialog(state) {
     if (!dialog) return;
-    const items = Object.values(state.notices).sort((a, b) => a.created - b.created || a.id.localeCompare(b.id));
-    const signature = JSON.stringify(items.map(({id,message,created,muteKey}) => ({id,message,created,muteKey})));
+    const items = orderedNotices(state);
+    const signature = JSON.stringify(items.map(({id,message,created,muteKey,type}) => ({id,message,created,muteKey,type})));
     if (signature === rendered) return;
     clearMotion.cancel();
     rendered = signature;
@@ -136,7 +142,18 @@ export function createNotificationCenter(store, notices) {
       const actions = document.createElement('div'); actions.className = 'isi-notice-actions';
       if (item.muteKey) actions.append(iconButton('mute', 'Never remind me again', () => mute(item)));
       actions.append(iconButton('close', 'Dismiss notification', () => dismiss(item.id))); row.append(mark, content, actions); list.append(row);
+      rows.set(item.id, row);
       if (dialog.open) listMotion.enter(row);
+    }
+    let next = list.firstElementChild;
+    for (const item of items) {
+      const row = rows.get(item.id);
+      if (row !== next) {
+        const focused = row.contains(document.activeElement) ? document.activeElement : null;
+        if (list.moveBefore) list.moveBefore(row, next);
+        else { list.insertBefore(row, next); focused?.focus({preventScroll:true}); }
+      }
+      next = row.nextElementSibling;
     }
     emptyState();
     dialog.querySelector('[data-clear-notices]').disabled = !items.length;
@@ -144,8 +161,12 @@ export function createNotificationCenter(store, notices) {
 
   function sync(state) {
     if (disposed) return;
-    const items = Object.values(state.notices).sort((a, b) => a.created - b.created || a.id.localeCompare(b.id));
-    badge.textContent = String(items.length); badge.hidden = !items.length; button.setAttribute('aria-label', `Notifications (${items.length})`);
+    const items = orderedNotices(state);
+    const updateCount = items.filter(item => item.type === 'update').length;
+    const regularCount = items.length - updateCount;
+    badge.textContent = String(regularCount); badge.hidden = !regularCount;
+    updateBadge.textContent = String(updateCount); updateBadge.hidden = !updateCount;
+    button.setAttribute('aria-label', updateCount ? `Notifications (${regularCount} regular, ${updateCount} ${updateCount === 1 ? 'update' : 'updates'})` : `Notifications (${regularCount})`);
     for (const id of scheduled) if (!state.notices[id] || (state.notices[id].delivered && !shown.has(id))) { notices.dismiss(id); scheduled.delete(id); }
     for (const id of shown) if (!state.notices[id]) shown.delete(id);
     renderDialog(state);
