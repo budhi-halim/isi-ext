@@ -13,7 +13,7 @@ const SOURCES = { tir: `${PORTAL_ORIGIN}/islandsun/master/Tir/json`, sample: `${
 export async function readMonitorIndex(kind, signal, accountName) {
   const observedAt = Date.now();
   const before = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
-  const text = await readPortalText(SOURCES[kind], { signal, cache: 'no-store', purpose:'warmup' });
+  const text = await readPortalText(SOURCES[kind], { signal, cache: 'no-store', purpose:'warmup', reason:'index' });
   let data;
   try { data = JSON.parse(text); } catch { throw new Error('unavailable'); }
   if (!Array.isArray(data.data) || Number(data.recordsFiltered) !== data.data.length) throw new Error('incomplete-index');
@@ -43,7 +43,7 @@ export async function readMonitoredRecord(record, repository, signal, options = 
   }
   let result = await repository.get(record.url, { signal, maxAge: PREVIEW_FRESH_MS, purpose:'notification', ...options });
   // Older session entries contain only preview products.
-  if (!Array.isArray(result.documents)) result = await repository.get(record.url, { signal, fresh: true });
+  if (!Array.isArray(result.documents)) result = await repository.get(record.url, { signal, purpose:'notification', ...options, fresh: true });
   const documents = result.documents || [];
   if (!documents.length) throw new Error('documents-unavailable');
   return { ...record, documents };

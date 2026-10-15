@@ -46,7 +46,7 @@ export function createProductCache(load, { maxEntries = 90, maxBytes = 8 * 1024 
             diagnosticLog('cache-hit',{url:job.url,shared:true,purpose:job.purpose});
             return shared.value;
           }
-          const value = await load(job.url, controller.signal, { priority: job.priority, purpose:job.purpose });
+          const value = await load(job.url, controller.signal, { priority: job.priority, purpose:job.purpose, reason:job.reason });
           if (persistence && !controller.signal.aborted && generation === startedGeneration) await persistence.save({url:job.url,value,fetched:now(),pageSize,startedAt:job.startedAt}).catch(storageFailed);
           return value;
         } finally { release?.(); }
@@ -61,7 +61,7 @@ export function createProductCache(load, { maxEntries = 90, maxBytes = 8 * 1024 
       }).finally(() => { job.settled = true; active--; if (urgent) urgentActive--; if (queued.get(job.url) === job) queued.delete(job.url); controllers.delete(controller); pump(); });
     }
   }
-  function request(url, { priority = false, purpose = priority ? 'hover' : 'notification', fresh = false, maxAge = lifetime } = {}) {
+  function request(url, { priority = false, purpose = priority ? 'hover' : 'notification', reason, fresh = false, maxAge = lifetime } = {}) {
     if (disposed) return { promise: Promise.reject(new DOMException('Disposed', 'AbortError')) };
     const cached = entries.get(url);
     if (!fresh && cached?.expires > now() && cached.fetched + maxAge > now()) {
@@ -74,7 +74,7 @@ export function createProductCache(load, { maxEntries = 90, maxBytes = 8 * 1024 
     if (existing) {
       diagnosticLog('cache-joined',{url,purpose});
       if (priority) existing.priority = true;
-      if (readPriority(purpose,recordKind(url)) > readPriority(existing.purpose,recordKind(url))) existing.purpose = purpose;
+      if (readPriority(purpose,recordKind(url)) > readPriority(existing.purpose,recordKind(url))) { existing.purpose = purpose; existing.reason = reason; }
       queue.sort((a,b) => readPriority(b.purpose,recordKind(b.url)) - readPriority(a.purpose,recordKind(a.url))); pump();
       return existing;
     }
@@ -84,7 +84,7 @@ export function createProductCache(load, { maxEntries = 90, maxBytes = 8 * 1024 
       queue.splice(queue.indexOf(victim), 1); queued.delete(victim.url); victim.settled = true;
       victim.reject(new DOMException('Prefetch superseded by an active request', 'AbortError'));
     }
-    const job = { url, priority, purpose, fresh, maxAge, startedAt:now(), consumers: new Set(), retained: false, settled: false };
+    const job = { url, priority, purpose, reason, fresh, maxAge, startedAt:now(), consumers: new Set(), retained: false, settled: false };
     job.promise = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
     queued.set(url, job); queue.push(job);
     queue.sort((a,b) => readPriority(b.purpose,recordKind(b.url)) - readPriority(a.purpose,recordKind(a.url))); pump();

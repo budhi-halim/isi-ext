@@ -2,18 +2,28 @@ import { createActivityLog, activityTime } from './activity-log.js';
 import { OFFLINE_STATUS } from './offline-config.js';
 import { UPDATE_KEY, compareVersions, versionParts } from './shared/update-logic.js';
 import { DIAGNOSTIC_FAILURES_KEY, sanitizeDiagnostic } from './connection-diagnostics.js';
+import { logFetch, logFetchResult } from './request-log.js';
 
 const HEALTH_KEY = 'islandsun.read-health';
 
-/** Mirror existing worker status into the portal console without extra requests or storage writes. */
-export function createActivityConsole({ api = chrome, logger = createActivityLog } = {}) {
+/** Mirror worker queue and request status into the portal console without extra portal requests. */
+export function createActivityConsole({ api = chrome, logger = createActivityLog, fetchStarted = logFetch, fetchFinished = logFetchResult } = {}) {
   const archive = logger('Offline saving'), recovery = logger('Read queue'), updates = logger('Updates'), failures = logger('Failures');
   const changedKeys = new Set();
-  let disposed = false, failureAt = 0, checkedAt = 0;
+  let disposed = false, failureAt = 0, checkedAt = 0, requestEvent;
   const keys = [OFFLINE_STATUS, HEALTH_KEY, UPDATE_KEY, DIAGNOSTIC_FAILURES_KEY];
   function accept(key, value, initial = false) {
     if (disposed || !value) return;
     if (key === OFFLINE_STATUS) {
+      const request = value.lastRequest;
+      const event = request && `${request.id}:${request.event}`;
+      if (event && event !== requestEvent && /^archive-[a-z-]+$/.test(request.kind)) {
+        requestEvent = event;
+        if (!initial) {
+          if (request.event === 'started') fetchStarted('',request.kind,request.number,{purpose:'archive'});
+          else if (request.event === 'finished') fetchFinished('',request.kind,{...request,purpose:'archive'});
+        }
+      }
       if (value.hadOutage || value.state === 'offline') archive.pause('offline');
       else if (value.state === 'waiting') {
         if (value.wait?.reason !== 'pacing') archive.pause(value.wait?.reason || 'queued', value.wait?.until);

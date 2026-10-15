@@ -1,13 +1,13 @@
 import { readMonitorIndex, readMonitoredRecord } from './monitor-data.js';
 import { acquireLocalLock } from './local-lock.js';
 import { monitorDetailsEligible } from './submission-logic.js';
-import { createActivityLog } from './activity-log.js';
+import { activityTime, createActivityLog } from './activity-log.js';
 import { INDEX_FRESH_MS, PREVIEW_FRESH_MS, statusSignature } from './fetch-policy.js';
 import { shouldMonitorTir, documentBaseline } from './tir-document-policy.js';
 import { checkTirDocuments } from './tir-document-check.js';
 import { diagnosticLog } from './diagnostic-log.js';
 import { OFFLINE_STATUS } from './offline-config.js';
-import { calendarDay } from './notification-logic.js';
+import { nextNotificationRead, previewQueue } from './monitor-schedule.js';
 
 /** Persist the current schedule so page changes and browser restarts do not restart discovery. */
 export function createNotificationMonitor(store, repository, notices, accountName, {
@@ -24,18 +24,11 @@ export function createNotificationMonitor(store, repository, notices, accountNam
     if (!disposed) await store.saveMonitor?.(memory);
   }
   function warmupQueue() {
-    const kinds = ['sample','tir'];
-    const lists = Object.fromEntries(kinds.map(kind => [kind,memory.records.filter(record => record.kind === kind)
-      .sort((a,b) => (calendarDay(b.date) || 0)-(calendarDay(a.date) || 0) || Number(b.id)-Number(a.id))]));
     const pageSize = Math.max(5,Math.min(100,Number(document.querySelector?.('[name="mytable_length"]')?.value) || memory.pageSize || 10));
     memory.pageSize = pageSize; repository.setPageSize?.(pageSize);
-    const queue = [];
-    for (let page=0;page<3;page++) for (const kind of kinds) {
-      for (const record of lists[kind].slice(page*pageSize,(page+1)*pageSize)) queue.push(`${record.kind}:${record.id}`);
-    }
-    return queue;
+    return previewQueue(memory.records, pageSize);
   }
-  async function observe(record, signal, purpose, documents = false) {
+  async function observe(record, signal, purpose, documents = false, reason) {
     const key = `${record.kind}:${record.id}`, previous = memory.checked[key];
     const signature = statusSignature(record);
     const changed = previous && previous.signature !== signature;
@@ -47,7 +40,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
       await checkpoint();
     }
     try {
-      let result = await readRecord(record,repository,signal,{purpose,fresh:!!changed});
+      let result = await readRecord(record,repository,signal,{purpose,reason,fresh:!!changed});
       if (documents && record.kind === 'tir') result = await checkDocuments(result,previous,signal,partial => retain(partial,true));
       await retain(result,documents);
       diagnosticLog('monitor-observed',{kind:record.kind,number:record.number,purpose,statusChanged:!!changed,documents});
@@ -55,8 +48,8 @@ export function createNotificationMonitor(store, repository, notices, accountNam
     } catch (error) {
       if (signal.aborted || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
       memory.checked[key] = {...memory.checked[key],retryAt:Date.now()+60000};
-      diagnosticLog('monitor-retry',{kind:record.kind,number:record.number,retryAt:memory.checked[key].retryAt,errorType:error.name,code:error.code});
-      activity.note('record-retry','A record check failed; retry in 60s. Other eligible records can continue.');
+      diagnosticLog('monitor-retry',{kind:record.kind,number:record.number,purpose,reason,retryAt:memory.checked[key].retryAt,errorType:error.name,code:error.code});
+      activity.note(`record-retry:${key}`,`${record.number || record.kind}: ${purpose === 'warmup' ? 'hover warm-up' : 'notification check'} failed; retry in 60s. Other eligible records can continue.`);
       await checkpoint(); return false;
     }
   }
@@ -88,6 +81,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         }
         await checkpoint(); notices.dismiss('notification-session');
         diagnosticLog('monitor-index',{records:index.length,intervalMs:INDEX_FRESH_MS});
+        activity.note(`index:${memory.indexedAt}`,`Lists checked: ${index.filter(record => record.kind === 'sample').length} Sample, ${index.filter(record => record.kind === 'tir').length} TIR. Unchanged verified details are reused.`);
       }
       memory.warmup ||= {}; memory.tir ||= {};
       if (!memory.warmup.queue && (!memory.warmup.completedAt || Date.now() >= memory.warmup.completedAt+PREVIEW_FRESH_MS)) {
@@ -95,25 +89,39 @@ export function createNotificationMonitor(store, repository, notices, accountNam
       }
       const byKey = new Map(memory.records.map(record=>[`${record.kind}:${record.id}`,record]));
       if (memory.warmup.queue) {
-        const key = memory.warmup.queue[memory.warmup.cursor++], record = byKey.get(key);
+        const position = memory.warmup.cursor, key = memory.warmup.queue[position], record = byKey.get(key);
+        if (record) {
+          const prior = memory.warmup.queue.slice(0,position).filter(key => key.startsWith(`${record.kind}:`)).length;
+          const page = Math.floor(prior / memory.pageSize) + 1;
+          activity.note(`preview:${memory.warmup.startedAt}:${record.kind}:${page}`,`Hover warm-up: ${record.kind === 'sample' ? 'Sample' : 'TIR'} page ${page}/3, up to ${memory.pageSize} records; fresh cached results need no request.`,Infinity);
+        }
         if (record && !(memory.checked[key]?.retryAt > Date.now())) { activity.resume(); await observe(record,signal,'warmup'); }
+        memory.warmup.cursor++;
         if (memory.warmup.cursor >= memory.warmup.queue.length) {
           memory.warmup = {completedAt:Date.now()}; diagnosticLog('warmup-complete',{records:Math.min(memory.records.length,memory.pageSize*6)});
         }
         await checkpoint(); schedule(250); return;
       }
-      const changed = memory.records.find(record => monitorDetailsEligible(record)
-        && !(memory.checked[`${record.kind}:${record.id}`]?.retryAt > Date.now())
-        && memory.checked[`${record.kind}:${record.id}`]?.signature !== statusSignature(record));
-      if (changed) { activity.resume(); await observe(changed,signal,'notification',changed.kind === 'tir'); schedule(250); return; }
+      activity.note(`preview-wait:${memory.warmup.completedAt}`,`Hover warm-up is complete; next refresh ${activityTime(memory.warmup.completedAt+PREVIEW_FRESH_MS)}. Notification checks and offline saving can use the interval.`,Infinity);
+      const next = nextNotificationRead(memory);
+      if (next) {
+        if (next.rotation.count === 1) {
+          const reason = {baseline:'first verified snapshot','status-change':'status changed',retry:'retrying a failed check'}[next.reason];
+          activity.note(`discovery:${next.record.kind}:${next.reason}`,`Notification backlog: ${next.record.kind === 'sample' ? 'Sample' : 'TIR'} batch, up to ${memory.pageSize} records (${next.remaining} pending). Purpose: ${reason}.`,0);
+        }
+        activity.resume(); await observe(next.record,signal,'notification',next.record.kind === 'tir',next.reason);
+        memory.discovery = next.rotation; await checkpoint(); schedule(250); return;
+      }
       if (!memory.tir.queue && Date.now() >= (memory.tir.nextAt || 0)) {
         memory.tir = {queue:memory.records.filter(record => record.kind === 'tir' && monitorDetailsEligible(record)
           && shouldMonitorTir(record,memory.checked[`tir:${record.id}`])).map(record=>`tir:${record.id}`),cursor:0,startedAt:Date.now()};
         await checkpoint();
       }
       if (memory.tir.queue) {
-        const key = memory.tir.queue[memory.tir.cursor++], record = byKey.get(key);
-        if (record && !(memory.checked[key]?.retryAt > Date.now())) { activity.resume(); await observe(record,signal,'notification',true); }
+        activity.note(`documents:${memory.tir.startedAt}`,`TIR document recheck: ${memory.tir.queue.length} eligible records; uploaded files are compared within their monitoring window.`,Infinity);
+        const key = memory.tir.queue[memory.tir.cursor], record = byKey.get(key);
+        if (record && !(memory.checked[key]?.retryAt > Date.now())) { activity.resume(); await observe(record,signal,'notification',true,'documents'); }
+        memory.tir.cursor++;
         if (memory.tir.cursor >= memory.tir.queue.length) {
           const archive = await readArchiveStatus();
           const interval = archive?.caughtUp || archive?.state === 'paused' ? 5*60000 : 2*3600000;
@@ -126,7 +134,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         const previous = memory.checked[`${record.kind}:${record.id}`];
         return previous?.retryAt && previous.retryAt <= Date.now() && monitorDetailsEligible(record);
       });
-      if (retryRecord) { await observe(retryRecord,signal,'notification',retryRecord.kind === 'tir'); schedule(250); return; }
+      if (retryRecord) { await observe(retryRecord,signal,'notification',retryRecord.kind === 'tir','retry'); schedule(250); return; }
       retry = 15000; activity.pause('idle'); schedule(5000);
     } catch (error) {
       if (!signal.aborted && !disposed) {

@@ -8,11 +8,11 @@ import { recordPortalProcessing } from './debug-capture-client.js';
 const detailSources = new WeakMap();
 
 /** Read a detail page without executing any of its scripts or loading its frames. */
-export async function readDetail(url, signal, { priority = false, purpose, readText = readPortalText } = {}) {
+export async function readDetail(url, signal, { priority = false, purpose, reason, readText = readPortalText } = {}) {
   const parsed = portalUrl(url);
   if (!parsed || !/^\/islandsun\/(?:master\/tir\/edit\/\d+|samplerequest\/edit)$/i.test(parsed.pathname)) throw new Error('This record link is unavailable.');
   const observedAt = Date.now();
-  const html = await readText(parsed.href, { signal, priority, purpose, redirect: 'follow' });
+  const html = await readText(parsed.href, { signal, priority, purpose, reason, redirect: 'follow' });
   const started = performance.now();
   const root = new DOMParser().parseFromString(html, 'text/html');
   recordPortalProcessing(url,'preview-dom-parse',performance.now()-started,root);

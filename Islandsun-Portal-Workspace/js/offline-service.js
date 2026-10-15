@@ -14,7 +14,7 @@ import { ACCOUNT_SCOPE, setAccountScope, scopedAccount } from './account-scope.j
 import { pauseAuthenticationWrites } from './offline-auth-service.js';
 import { purgeCaptures } from './debug-capture-store.js';
 import { capturedError } from './debug-capture-data.js';
-import { ensureVault, vaultKey } from './offline-vault.js';
+import { ensureVault, vaultAccount, vaultKey } from './offline-vault.js';
 import { saveDetailSource, saveDocumentSource, saveFailedDocumentSource, saveFailedDetailSource } from './offline-source-store.js';
 import { DETAIL_PARSER_REVISION } from './offline-parser-version.js';
 import { saveIndexSource, retainFailedIndexSource, resolveIndexFailure } from './offline-index-source.js';
@@ -82,7 +82,7 @@ export async function archiveResponse(url, signal, options = {}, fetcher = fetch
 
 /** Alarm slices persist every record independently, so worker suspension cannot lose progress. */
 export function startOfflineService(gate, diagnostics, debug) {
-  let running = false, controller, pendingRecord, pendingFingerprint, pendingIndex, runningAccount, deferredRead = false;
+  let running = false, controller, pendingRecord, pendingNumber, pendingFingerprint, pendingIndex, runningAccount, deferredRead = false;
   let deleting = false, completion = Promise.resolve(), finish, resumeNeeded = false;
   gate.onAvailable?.(() => { if (resumeNeeded && !running && !deleting) { resumeNeeded = false; void tick(); } });
   let statusWrites = Promise.resolve(), outageRevision = 0;
@@ -123,6 +123,7 @@ export function startOfflineService(gate, diagnostics, debug) {
     const operation = async signal => {
       const started = Date.now();
       await note('job-start',{queueMs:started-queuedAt});
+      if (kind !== 'archive-identity') await status({lastRequest:{id:jobId,event:'started',kind,purpose:'archive',number:pendingNumber,at:started}});
       let stage;
       const record = (outcome, status = 0) => diagnostics?.append({ kind, outcome, status, stage, durationMs: Date.now() - started }).catch(() => {});
       record('started');
@@ -130,12 +131,14 @@ export function startOfflineService(gate, diagnostics, debug) {
         const result = await read(signal,value => { stage = value; note('job-stage',{stage}).catch(()=>{}); });
         record('complete');
         await note('job-complete',{durationMs:Date.now()-started,stage});
+        if (Date.now()-started >= 4000) await status({lastRequest:{id:jobId,event:'finished',kind,purpose:'archive',number:pendingNumber,outcome:'complete',durationMs:Date.now()-started,at:Date.now()}});
         return result;
       } catch (error) {
         record(connectionFailure(error, signal), error.status || 0);
         await retainFailure(kind,error,Date.now()-started,stage);
         reportedFailures.add(error);
         await note('job-failed',{stage,...capturedError(error),status:error.status,durationMs:Date.now()-started,failure:true});
+        await status({lastRequest:{id:jobId,event:'finished',kind,purpose:'archive',number:pendingNumber,outcome:connectionFailure(error,signal),status:error.status || 0,durationMs:Date.now()-started,at:Date.now()}});
         throw error;
       }
     };
@@ -187,6 +190,8 @@ export function startOfflineService(gate, diagnostics, debug) {
       const previous = (await chrome.storage.local.get(OFFLINE_STATUS))[OFFLINE_STATUS] || {};
       const recovering = previous.hadOutage || previous.state === 'offline';
       if (!settings.enabled || settings.account && !settings.offlineArchive && !recovering) return;
+      // A protected archive cannot save without its session key; avoid connection-only retry loops.
+      if (settings.account && settings.offlineArchive && !recovering && (await vaultAccount(settings.account))?.password) await vaultKey(settings.account);
       const home = await runRead('archive-identity', async laneSignal => {
         const response = await readResponse(PORTAL_HOME, AbortSignal.any([signal,laneSignal]));
         return recordedParse('identity', {html:await response.text()});
@@ -194,7 +199,7 @@ export function startOfflineService(gate, diagnostics, debug) {
       if (home.deferred) { await status({state:'waiting'}); return; }
       signal.throwIfAborted();
       if (!home.result) { await setAccountScope('','',started); await status({state:'signed-out', account:'',name:'',checkedAt:Date.now()},probeRevision); return; }
-      await status({state:settings.offlineArchive ? 'active' : 'paused',checkedAt:Date.now(),error:''},probeRevision);
+      await status({...(settings.offlineArchive ? {} : {state:'paused'}),checkedAt:Date.now(),error:''},probeRevision);
       signal.throwIfAborted();
       checkingConnection = false;
       const identity = home.result, account = identity.account;
@@ -314,6 +319,7 @@ export function startOfflineService(gate, diagnostics, debug) {
         const record = await nextDetail(account,{kinds,afterKind,ordered:true});
         if (!record) break;
         pendingRecord = record.key;
+        pendingNumber = record.number;
         pendingFingerprint = record.fingerprint;
         await wait(300,signal);
         const resumeFiles = record.detailCapture?.fingerprint === record.fingerprint
@@ -423,6 +429,7 @@ export function startOfflineService(gate, diagnostics, debug) {
         if (incomplete) { await postponeDetail(record.key); break; }
         await completeDetailCapture(captured);
         pendingRecord = null;
+        pendingNumber = null;
       }
       const remainingDetail = await nextDetail(account,{kinds,ordered:true,includeWaiting:true});
       const coverage = await Promise.all(kinds.map(kind => readArchive('meta',`index:${account}:${kind}`)));
@@ -459,7 +466,7 @@ export function startOfflineService(gate, diagnostics, debug) {
         await status({...failure, checkedAt:Date.now()},checkingConnection && error.code === 'SIGNED_OUT' ? probeRevision : undefined);
       }
     } finally {
-      controller = null; pendingRecord = null; pendingFingerprint = null; pendingIndex = null; runningAccount = null;
+      controller = null; pendingRecord = null; pendingNumber = null; pendingFingerprint = null; pendingIndex = null; runningAccount = null;
       await Promise.allSettled([...observations]);
       if (!observations.size) await closeParser();
       running = false;

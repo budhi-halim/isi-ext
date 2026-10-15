@@ -111,7 +111,7 @@ function acquireRead(signal, priority, editorLookup, purpose, url) {
 }
 
 /** Keep a record's dependent reads together so another record cannot replace portal session state. */
-export async function withPortalRead(task, { signal, priority = false, editorLookup, purpose, url } = {}) {
+export async function withPortalRead(task, { signal, priority = false, editorLookup, purpose = priority ? 'hover' : 'notification', reason, url } = {}) {
   listen();
   signal = signal ? AbortSignal.any([signal, lifecycle.signal]) : lifecycle.signal;
   if (editorLookup && !isTirSourceUrl(editorLookup)) throw new Error('This request link is unavailable.');
@@ -120,7 +120,7 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
   let previousRead = false;
   const loggedRecords = new Set();
   let failed = false;
-  async function read(url, { signal: _signal, priority: _priority, editorLookup: _lookup, purpose:_purpose, url:_url, binary = false, maxBytes, requestNumber, ...options } = {}) {
+  async function read(url, { signal: _signal, priority: _priority, editorLookup: _lookup, purpose:_purpose, reason:_reason, url:_url, binary = false, maxBytes, requestNumber, ...options } = {}) {
     permit.assertAvailable();
     if (!portalUrl(String(url))) throw new Error('This portal link is unavailable.');
     if (editorLookup && (String(url) !== editorLookup || (options.method && options.method !== 'GET'))) throw new Error('This request link is unavailable.');
@@ -143,9 +143,10 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
       await verifyPageAccount();
       transactionSignal.throwIfAborted();
       const number = requestNumber || knownRequestNumber(url);
-      if (number && !loggedRecords.has(number)) {
-        logFetch(url, kind, number);
-        loggedRecords.add(number);
+      const logKey = number || `${kind}:${url}`;
+      if (!loggedRecords.has(logKey)) {
+        logFetch(url, kind, number, {purpose,reason});
+        loggedRecords.add(logKey);
       }
       // Background reads must never follow a protected page into a login/logout handler.
       const response = await capturePortalFetch(url, { ...options, credentials: 'include', redirect: 'manual', signal: requestSignal }, kind, binary ? 60000 : 25000);
@@ -192,7 +193,7 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
       throw error;
     } finally {
       recordConnectionDiagnostic({kind, outcome, status, durationMs:performance.now() - started});
-      logFetchResult(url, kind, {number:requestNumber, outcome, status, durationMs:performance.now() - started});
+      logFetchResult(url, kind, {number:requestNumber, outcome, status, durationMs:performance.now() - started, purpose, reason});
     }
   }
   try { return await task(read); }
