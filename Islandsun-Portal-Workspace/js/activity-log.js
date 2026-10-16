@@ -14,7 +14,7 @@ const PAUSE_REASONS = Object.freeze({
   startup: 'browser activity checks are starting',
   'other-tab': 'another portal tab owns notification checks, including in the background',
   'signed-out': 'sign-in is required',
-  'unlock-required': 'the saved account needs to be unlocked; open the saved offline copy and sign in once for this browser session',
+  'unlock-required': 'automatic saving is preparing after the extension update; opening the offline copy is not required',
   disabled: 'saving is disabled in settings',
   retry: 'a check failed; it will retry automatically',
   idle: 'watched details are cached or not yet due for another check',

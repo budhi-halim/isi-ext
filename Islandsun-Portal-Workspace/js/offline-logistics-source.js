@@ -11,7 +11,7 @@ export async function resolveAvailabilityDates(account,payload,shouldContinue) {
     const number = record.fields.srs_no;
     if (!wanted.has(number)) return;
     requests.set(number,requests.has(number) ? null : {id:record.id,date:record.date});
-  },{details:false,readableOnly:true,shouldContinue});
+  },{details:false,readableOnly:true,shouldContinue,capture:true});
   return {...payload,data:payload.data.map(row => {
     let identity;
     try { identity = availabilityIdentity(row); }
@@ -28,7 +28,7 @@ export async function resolveStockRows(account,rows,shouldContinue = () => true)
   await visitRecords(account,'stock',record => {
     const number = record.fields.srs_no;
     if (wanted.has(number)) requests.set(number,requests.has(number) ? null : {id:record.id,date:record.date});
-  },{details:false,readableOnly:true,shouldContinue});
+  },{details:false,readableOnly:true,shouldContinue,capture:true});
   const result = [];
   for (const row of rows) {
     if (!shouldContinue()) throw new DOMException('Archive paused.','AbortError');

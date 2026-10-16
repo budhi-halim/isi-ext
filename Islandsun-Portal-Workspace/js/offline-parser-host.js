@@ -8,6 +8,7 @@ import { capturePeriod } from './offline-period-source.js';
 import { parseOrderSheet } from './offline-print.js';
 import { parseSampleSheet } from './offline-sample-print.js';
 import { seedVaultKey } from './offline-vault.js';
+import { seedCaptureSession } from './offline-capture-session.js';
 import { includedIndexRows } from './offline-index-identity.js';
 import { indexCompletion } from './offline-index-completion.js';
 let generation = 0, operations = Promise.resolve();
@@ -20,9 +21,12 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const operation = operations.then(async () => {
     if (current !== generation) throw new DOMException('Archive paused.','AbortError');
     if (message.account) {
-      if (!Array.isArray(message.vaultKey) || message.vaultKey.length !== 32 || !message.vaultKey.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) throw new Error('The archive unlock key is unavailable.');
-      seedVaultKey(message.account,message.vaultKey);
+      if (!message.captureSession) throw new Error('The archive capture session is unavailable.');
+      if (message.vaultKey !== undefined && (!Array.isArray(message.vaultKey) || message.vaultKey.length !== 32 || !message.vaultKey.every(value => Number.isInteger(value) && value >= 0 && value <= 255))) throw new Error('The archive unlock key is invalid.');
+      seedCaptureSession(message.account,message.captureSession);
+      seedVaultKey(message.account,message.vaultKey || null);
       delete message.vaultKey;
+      delete message.captureSession;
     }
     if (message.operation === 'identity') return parseIdentity(message.html);
     if (message.operation === 'order-sheet') return parseOrderSheet(message.html,message.documentLink,message.deliveryId,message.logo);
@@ -102,8 +106,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       total:records.length, stored, skippedIdentifiers, importing:false,partial:!reconciled,pendingDates});
     return {total:records.length, stored, skippedIdentifiers};
   }).finally(() => {
-    if (message.account) seedVaultKey(message.account,null);
+    if (message.account) { seedVaultKey(message.account,null); seedCaptureSession(message.account,null); }
     delete message.vaultKey;
+    delete message.captureSession;
   });
   operations = operation.catch(() => {});
   operation.then(result => respond({result}), error => respond({error:error.message}));

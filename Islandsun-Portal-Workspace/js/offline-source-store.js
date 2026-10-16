@@ -49,7 +49,7 @@ export async function saveDocumentSource(record, document, html, signal) {
 
 async function saveSource(record, {html, supplementary, url, key, format, provenance, capturedAt = provenance?.observedAt ?? Date.now()}, signal) {
   signal?.throwIfAborted();
-  const current = await readVisibleRecord(record.key, record.account, record.kind);
+  const current = await readVisibleRecord(record.key, record.account, record.kind,{capture:true});
   if (!current || current.detailUrl !== record.detailUrl || current.fingerprint !== record.fingerprint) return false;
   if (['document-source','failed-document-source'].includes(format) && !current.detail?.documents?.some(document => document.url === url)) return false;
   if (typeof html !== 'string' || supplementary !== null && typeof supplementary !== 'string') {

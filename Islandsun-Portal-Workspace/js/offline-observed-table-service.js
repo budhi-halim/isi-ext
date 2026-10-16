@@ -11,7 +11,7 @@ export async function retainObservedSampleTable(message, sender, settings, canCo
     || !settings.enabled || !settings.offlineArchive || settings.account !== message.account
     || typeof message.html !== 'string' || !message.html || message.html.length > OBSERVED_TABLE_LIMIT
     || !Number.isFinite(message.observedAt) || Math.abs(Date.now() - message.observedAt) > 60000) return false;
-  const record = await readVisibleRecord(archiveKey(message.account,'sample',identity.id),message.account,'sample');
+  const record = await readVisibleRecord(archiveKey(message.account,'sample',identity.id),message.account,'sample',{capture:true});
   if (!record || !sameObservedSample(record.detailUrl,message.url) || record.number !== message.number || !canContinue()) return false;
   return saveObservedTableSource(record, message.html, message.observedAt);
 }

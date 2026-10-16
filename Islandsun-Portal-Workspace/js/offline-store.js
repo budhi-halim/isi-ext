@@ -1,4 +1,4 @@
-import { sealRecord, openRecord, sealBytes, openBytes, wrapFileKey, unwrapFileKey, clearVault } from './offline-vault.js';
+import { sealRecord, openRecord, sealBytes, openBytes, wrapFileKey, unwrapFileKey, clearVault, captureReadAccess } from './offline-vault.js';
 import { archiveRecordReadable } from './offline-access.js';
 
 const DATABASE = 'islandsun-offline';
@@ -73,19 +73,19 @@ function encryptedMetadata(record = {}) {
   return metadata;
 }
 
-export async function readArchive(store, key) {
+export async function readArchive(store, key, options) {
   const database = await openArchive();
   const value = await request(database.transaction(store).objectStore(store).get(key));
-  return store === 'records' ? openRecord(value) : value;
+  return store === 'records' ? openRecord(value,options) : value;
 }
 
 /** Check account and source permissions before decrypting a record for the viewer. */
-export async function readVisibleRecord(key, account, kind) {
+export async function readVisibleRecord(key, account, kind, options) {
   const database = await openArchive();
   const value = await request(database.transaction('records').objectStore('records').get(key));
   if (!value || value.account !== account || value.kind !== kind) return null;
   if (!archiveRecordReadable(value)) throw Object.assign(new Error('Connect to the portal to check access to this older saved record.'),{code:'ARCHIVE_SCOPE_PENDING'});
-  return openRecord(value);
+  return openRecord(value,options);
 }
 export async function archiveMeta(key, value) {
   const database = await openArchive();
@@ -187,7 +187,7 @@ export async function saveRecords(records, shouldContinue = () => true) {
 }
 
 export async function updateDetail(key, detail, savedAt = Date.now(), {pendingFiles = false, expected, shouldContinue = () => true} = {}) {
-  const existing = await readArchive('records', key);
+  const existing = await readArchive('records', key,{capture:true});
   if (!existing || !shouldContinue()) return false;
   const encrypted = await sealRecord({...existing,detail});
   return quotaWrite(async () => {
@@ -330,13 +330,14 @@ export async function saveFile(record, file, {shouldContinue = () => true} = {})
   }, record.date);
 }
 
-export async function recordFiles(key, {purpose = 'documents'} = {}) {
+export async function recordFiles(key, {purpose = 'documents', decrypt = true} = {}) {
   const database = await openArchive();
   const transaction = database.transaction(['files','blobs']);
   const files = (await request(transaction.objectStore('files').index('parent').getAll(key)))
     .filter(file => (file.purpose || 'documents') === purpose);
   const stored = await Promise.all(files.map(async file => ({file,shared:file.hash ? await request(transaction.objectStore('blobs').get(file.hash)) : null})));
   return Promise.all(stored.map(async ({file,shared}) => {
+    if (!decrypt) return {...file,available:Boolean(shared?.encrypted && file.wrappedKey || shared?.blob?.size || file.blob?.size)};
     if (!file.hash) return file;
     if (!shared?.encrypted) return {...file,blob:shared?.blob?.slice(0,shared.blob.size,file.type)};
     const raw = await unwrapFileKey(file.account,file.wrappedKey);
@@ -468,40 +469,48 @@ export async function reconcileRecords(account, kind, keys, scan = null, period 
   return true;
 }
 
-export async function nextDetail(account, {kinds, afterKind, ordered = false, includeWaiting = false} = {}) {
+export async function nextDetail(account, {kinds, afterKind, ordered = false, includeWaiting = false, capture = false} = {}) {
   const database = await openArchive();
+  const readable = capture ? await captureReadAccess(account) : () => true;
+  let refresh;
   if (kinds?.length) {
     const start = ordered ? 0 : Math.max(0,kinds.indexOf(afterKind) + 1);
     for (let offset = 0; offset < kinds.length; offset++) {
       const kind = kinds[(start + offset) % kinds.length];
-      const record = await queuedDetail(database, 'detailKindQueue', [account,kind],includeWaiting);
+      const record = await queuedDetail(database, 'detailKindQueue', [account,kind],includeWaiting,capture,readable);
+      if (record?.captureRefresh) { refresh ||= record; continue; }
       if (record) return record;
     }
-    return null;
+    return refresh || null;
   }
-  return queuedDetail(database, 'detailQueue', [account],includeWaiting);
+  return queuedDetail(database, 'detailQueue', [account],includeWaiting,capture,readable);
 }
 
 /** Preserve newest-first priority inside one section without decrypting skipped rows. */
-function queuedDetail(database, index, prefix, includeWaiting) {
+function queuedDetail(database, index, prefix, includeWaiting, capture, readable) {
   return new Promise((resolve, reject) => {
+    let refresh;
     const cursor = database.transaction('records').objectStore('records').index(index)
       .openCursor(IDBKeyRange.bound([...prefix,0,-Infinity],[...prefix,1,Infinity]));
     cursor.onerror = () => reject(cursor.error);
     cursor.onsuccess = () => {
       const item = cursor.result;
-      if (!item) return resolve(null);
+      if (!item) return resolve(refresh || null);
       const value = item.value;
       const captured = value.detailAt && value.detailPriority === 1 && !value.detailCapture && !value.detailFailures;
-      if (!captured && archiveRecordReadable(value) && value.detailUrl && (includeWaiting || value.nextDetailAt <= Date.now())) return resolve(openRecord(value));
+      if (!captured && archiveRecordReadable(value) && value.detailUrl && (includeWaiting || value.nextDetailAt <= Date.now())) {
+        if (readable(value)) return resolve(openRecord(value,{capture}));
+        refresh ||= {...value,captureRefresh:true};
+      }
       item.continue();
     };
   });
 }
 
 /** Decrypt bounded cursor batches without holding another full archive copy in memory. */
-export async function visitRecords(account, kind, visit, {shouldContinue = () => true, details = true, readableOnly = false} = {}) {
+export async function visitRecords(account, kind, visit, {shouldContinue = () => true, details = true, readableOnly = false, capture = false} = {}) {
   const database = await openArchive();
+  const captureReadable = capture ? await captureReadAccess(account) : () => true;
   const indexKey = [account,kind];
   let after, unverified = 0;
   for (;;) {
@@ -523,9 +532,9 @@ export async function visitRecords(account, kind, visit, {shouldContinue = () =>
         item.continue();
       };
     });
-    const readable = readableOnly ? rows.filter(row => archiveRecordReadable(row)) : rows;
+    const readable = rows.filter(row => (!readableOnly || archiveRecordReadable(row)) && captureReadable(row));
     unverified += rows.length-readable.length;
-    const batch = await Promise.all(readable.map(row => openRecord(row,{details})));
+    const batch = await Promise.all(readable.map(row => openRecord(row,{details,capture})));
     if (!shouldContinue()) throw new DOMException('Archive scan cancelled.','AbortError');
     for (const record of batch) {
       if (!shouldContinue()) throw new DOMException('Archive scan cancelled.','AbortError');

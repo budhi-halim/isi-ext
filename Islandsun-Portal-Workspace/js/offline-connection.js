@@ -1,6 +1,6 @@
 /** A failed record/file read cannot establish that the whole portal is down. */
 export function archiveFailure(error, checkingConnection) {
-  if (error.code === 'OFFLINE_LOCKED') return {state:'unlock-required',error:'Unlock this account’s offline copy to resume saving.'};
+  if (error.code === 'OFFLINE_LOCKED') return {state:'attention',error:'A saved record could not be reopened for processing. Saving will retry automatically.'};
   if (error.code === 'SIGNED_OUT') return { state: 'signed-out', error: 'Sign in to continue saving offline records.' };
   if (error.name === 'TimeoutError' || error instanceof TypeError && /fetch|network/i.test(error.message)
     || checkingConnection && error.status >= 500) return {

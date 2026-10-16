@@ -14,7 +14,8 @@ import { ACCOUNT_SCOPE, setAccountScope, scopedAccount } from './account-scope.j
 import { pauseAuthenticationWrites } from './offline-auth-service.js';
 import { purgeCaptures } from './debug-capture-store.js';
 import { capturedError } from './debug-capture-data.js';
-import { ensureVault, vaultAccount, vaultKey } from './offline-vault.js';
+import { ensureVault, vaultKey } from './offline-vault.js';
+import { captureSession } from './offline-capture-session.js';
 import { saveDetailSource, saveDocumentSource, saveFailedDocumentSource, saveFailedDetailSource } from './offline-source-store.js';
 import { DETAIL_PARSER_REVISION } from './offline-parser-version.js';
 import { saveIndexSource, retainFailedIndexSource, resolveIndexFailure } from './offline-index-source.js';
@@ -39,7 +40,12 @@ async function parse(operation, data) {
   await parserClosing;
   parserUsers++;
   try {
-    const key = data.account ? await vaultKey(data.account) : undefined;
+    let key, capture;
+    if (data.account) {
+      capture = await captureSession(data.account);
+      try { key = await vaultKey(data.account); }
+      catch (error) { if (error.code !== 'OFFLINE_LOCKED') throw error; }
+    }
     if (!parserOpening) parserOpening = (async () => {
       const url = chrome.runtime.getURL('offline-parser.html');
       const contexts = await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT'], documentUrls:[url]});
@@ -47,7 +53,7 @@ async function parse(operation, data) {
     })().finally(() => { parserOpening = null; });
     await parserOpening;
     // Offscreen documents expose runtime messaging, but not chrome.storage.session.
-    const response = await chrome.runtime.sendMessage({target:'offline-parser', operation, ...data, vaultKey:key});
+    const response = await chrome.runtime.sendMessage({target:'offline-parser', operation, ...data, vaultKey:key, captureSession:capture});
     if (!response || response.error) throw Object.assign(new Error(response?.error || 'The archive parser is unavailable.'),{code:'ARCHIVE_DATA'});
     return response.result;
   } finally { parserUsers--; }
@@ -190,8 +196,6 @@ export function startOfflineService(gate, diagnostics, debug) {
       const previous = (await chrome.storage.local.get(OFFLINE_STATUS))[OFFLINE_STATUS] || {};
       const recovering = previous.hadOutage || previous.state === 'offline';
       if (!settings.enabled || settings.account && !settings.offlineArchive && !recovering) return;
-      // A protected archive cannot save without its session key; avoid connection-only retry loops.
-      if (settings.account && settings.offlineArchive && !recovering && (await vaultAccount(settings.account))?.password) await vaultKey(settings.account);
       const home = await runRead('archive-identity', async laneSignal => {
         const response = await readResponse(PORTAL_HOME, AbortSignal.any([signal,laneSignal]));
         return recordedParse('identity', {html:await response.text()});
@@ -213,12 +217,18 @@ export function startOfflineService(gate, diagnostics, debug) {
       await archiveMeta(`account:${account}`, {...identity, checkedAt:Date.now()});
       await status({account, name:identity.name});
       await ensureVault(account,identity.name);
-      await vaultKey(account);
+      await captureSession(account);
       await status({state:'active', account, name:identity.name, checkedAt:Date.now(), error:''});
       const kinds = SOURCE_ORDER.filter(kind => OFFLINE_SOURCES[kind]);
       const stamps = await Promise.all(kinds.map(kind => readArchive('meta',`index:${account}:${kind}`)));
-      const due = kinds.map((kind,index) => ({kind, stamp:stamps[index]?.scan || HTML_SOURCES[kind]?.periodic ? stamps[index]?.attemptedAt || 0 : stamps[index]?.checkedAt || 0, scan:stamps[index]?.scan, periodRequest:HTML_SOURCES[kind]?.periodic ? nextPeriod(stamps[index]) : undefined, nextAttemptAt:stamps[index]?.nextAttemptAt || 0}))
-        .filter(item => Date.now() >= item.nextAttemptAt && (HTML_SOURCES[item.kind]?.periodic ? !!item.periodRequest : item.scan || Date.now() - item.stamp >= (item.kind === 'products' ? 3600000 : INDEX_INTERVAL)))
+      const due = kinds.map((kind,index) => {
+        const saved = stamps[index] || {}, periodic = HTML_SOURCES[kind]?.periodic;
+        const stamp = saved.scan || periodic ? saved.attemptedAt || 0 : saved.checkedAt || 0;
+        return {kind,stamp:saved.captureRefreshAt > (saved.attemptedAt || 0) ? 0 : stamp,
+          captureRefresh:!!saved.captureRefreshAt,scan:saved.scan,
+          periodRequest:periodic ? nextPeriod(saved) : undefined,nextAttemptAt:saved.nextAttemptAt || 0};
+      })
+        .filter(item => Date.now() >= item.nextAttemptAt && (HTML_SOURCES[item.kind]?.periodic ? !!item.periodRequest : item.captureRefresh || item.scan || Date.now() - item.stamp >= (item.kind === 'products' ? 3600000 : INDEX_INTERVAL)))
         .sort((a,b) => a.stamp - b.stamp || SOURCE_ORDER.indexOf(a.kind)-SOURCE_ORDER.indexOf(b.kind))[0];
       if (due) {
         pendingIndex = `index:${account}:${due.kind}`;
@@ -316,8 +326,17 @@ export function startOfflineService(gate, diagnostics, debug) {
       const rotationKey = `index:${account}:detail-rotation`;
       let afterKind = (await readArchive('meta',rotationKey))?.kind;
       while (Date.now() - started < 20000) {
-        const record = await nextDetail(account,{kinds,afterKind,ordered:true});
+        const record = await nextDetail(account,{kinds,afterKind,ordered:true,capture:true});
         if (!record) break;
+        if (record.captureRefresh) {
+          const key = `index:${account}:${record.kind}`;
+          const previous = await readArchive('meta',key);
+          if (!previous?.captureRefreshAt) {
+            await archiveMeta(key,{...previous,captureRefreshAt:Date.now()});
+            await note('capture-list-refresh',{kind:record.kind,reason:'Pending records need a fresh list after browser restart.'});
+          }
+          break;
+        }
         pendingRecord = record.key;
         pendingNumber = record.number;
         pendingFingerprint = record.fingerprint;
@@ -367,7 +386,7 @@ export function startOfflineService(gate, diagnostics, debug) {
         // Persist details first; absent file bytes stay visibly marked as not yet saved.
         const capturedAt = resumeFiles ? record.detailAt : Date.now();
         if (!resumeFiles && !await updateDetail(record.key,detail,capturedAt,{pendingFiles:true})) continue;
-        const captured = await readArchive('records',record.key);
+        const captured = await readArchive('records',record.key,{capture:true});
         if (!captured || captured.fingerprint !== record.fingerprint || captured.detailAt !== capturedAt) continue;
         if (resumeFiles) {
           afterKind = record.kind;
@@ -375,7 +394,7 @@ export function startOfflineService(gate, diagnostics, debug) {
           await note('documents-resumed',{recordId:record.id,detailAt:record.detailAt});
         }
         await note('detail-saved',{recordId:record.id,number:record.number,documents:detail.documents.length});
-        const files = await recordFiles(record.key);
+        const files = await recordFiles(record.key,{decrypt:false});
         for (const file of files) {
           signal.throwIfAborted();
           if (!file.hash && file.blob) await saveFile(record,file);
@@ -383,7 +402,7 @@ export function startOfflineService(gate, diagnostics, debug) {
         let incomplete = false;
         for (const document of settings.offlineDocuments ? includedOfflineDocuments(detail.documents) : []) {
           const sampleSheet = record.kind === 'sample' && document.format === 'sample-request-sheet' && samplePrintUrl(document.url,record.detailUrl);
-          if ((!downloadUrl(document.url) && !sampleSheet) || files.some(file => file.url === document.url && (file.hash || file.blob))) continue;
+          if ((!downloadUrl(document.url) && !sampleSheet) || files.some(file => file.url === document.url && file.available)) continue;
           if (Date.now() - started >= 20000) { incomplete = true; break; }
           await wait(300,signal);
           const downloaded = await runRead(`archive-${record.kind}-document`, async (laneSignal,setStage) => {
@@ -431,10 +450,10 @@ export function startOfflineService(gate, diagnostics, debug) {
         pendingRecord = null;
         pendingNumber = null;
       }
-      const remainingDetail = await nextDetail(account,{kinds,ordered:true,includeWaiting:true});
+      const remainingDetail = await nextDetail(account,{kinds,ordered:true,includeWaiting:true,capture:true});
       const coverage = await Promise.all(kinds.map(kind => readArchive('meta',`index:${account}:${kind}`)));
       const caughtUp = !remainingDetail && coverage.every(value => value?.checkedAt && !value.partial && !value.importing);
-      resumeNeeded = !!remainingDetail && remainingDetail.nextDetailAt <= Date.now();
+      resumeNeeded = !!remainingDetail && !remainingDetail.captureRefresh && remainingDetail.nextDetailAt <= Date.now();
       await status({state:deferredRead ? 'waiting' : 'active', syncedAt:Date.now(),caughtUp});
       await note('archive-checkpoint',{account,caughtUp,nextRecord:remainingDetail?.number || null});
     } catch (error) {
@@ -477,6 +496,7 @@ export function startOfflineService(gate, diagnostics, debug) {
     const settings = await readAccountSettings();
     const previous = (await chrome.storage.local.get(OFFLINE_STATUS))[OFFLINE_STATUS] || {};
     if (!settings.enabled || settings.account && !settings.offlineArchive && !previous.hadOutage) { controller?.abort(); await chrome.alarms.clear(ALARM); await status({state:'paused'}); return; }
+    if (previous.state === 'unlock-required') await status({state:'waiting',error:''});
     const alarm = await chrome.alarms.get(ALARM);
     if (alarm?.periodInMinutes !== 0.5) await chrome.alarms.create(ALARM,{delayInMinutes:0.5,periodInMinutes:0.5});
   }
@@ -505,7 +525,7 @@ export function startOfflineService(gate, diagnostics, debug) {
           || !Number.isFinite(message.observedAt) || message.observedAt > Date.now() || Date.now()-message.observedAt > 120000) return false;
         const settings = await readAccountSettings();
         if (deleting || !settings.enabled || !settings.offlineArchive || settings.account !== message.account) return false;
-        await ensureVault(settings.account); await vaultKey(settings.account);
+        await ensureVault(settings.account);
         const reset = (await chrome.storage.local.get('islandsun.archive-reset'))['islandsun.archive-reset'];
         if (deleting || (await readAccountSettings()).account !== settings.account
           || reset && (!reset.account || reset.account === settings.account) && message.observedAt <= reset.at) return false;

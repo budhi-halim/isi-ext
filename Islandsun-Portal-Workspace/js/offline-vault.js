@@ -1,9 +1,11 @@
 import { OFFLINE_PASSWORD_REQUIRED } from './offline-access-policy.js';
+import { captureSession, clearCaptureSessions } from './offline-capture-session.js';
 
 const ITERATIONS = 600000;
 const SESSION_KEY = 'islandsun.offline-vault-keys';
 const encoder = new TextEncoder(), decoder = new TextDecoder();
 const keys = new Map(), preparing = new Map();
+const captureEnvelopes = new Map(), openedEnvelopes = new Map();
 let databasePromise, sessionWrites = Promise.resolve();
 const request = operation => new Promise((resolve,reject) => {
   operation.onsuccess = () => resolve(operation.result);
@@ -95,7 +97,7 @@ export async function vaultKey(account) {
     const saved = globalThis.chrome?.storage?.session ? (await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY] : null;
     const entry = await vaultAccount(account);
     const raw = saved?.[account] || (!OFFLINE_PASSWORD_REQUIRED && entry?.deviceKey) || entry?.provisionalKey;
-    if (!raw) throw Object.assign(new Error('Unlock this account’s offline copy to resume saving.'),{code:'OFFLINE_LOCKED'});
+    if (!raw) throw Object.assign(new Error('Unlock this account’s offline copy to view saved records.'),{code:'OFFLINE_LOCKED'});
     await retainDeviceKey(account, raw);
     return raw;
   })().catch(error => { keys.delete(account); throw error; }));
@@ -190,22 +192,75 @@ export async function unlockVault(username, password, previous = false) {
 
 export async function sealRecord(record) {
   await ensureVault(record.account);
-  const raw = await vaultKey(record.account);
   const {fields,number,detail,...metadata} = record;
-  if (fields !== undefined || number !== undefined) metadata.content = await sealBytes(raw,encoder.encode(JSON.stringify({fields,number})),`record:${record.key}`);
-  if (detail !== undefined) metadata.detailContent = await sealBytes(raw,encoder.encode(JSON.stringify(detail)),`detail:${record.key}`);
-    for (const field of ['fingerprint','detailRevision']) if (metadata[field] && !metadata[field].startsWith('sha256:')) {
-      metadata[field] = `sha256:${pack(await crypto.subtle.digest('SHA-256',encoder.encode(metadata[field]))).map(value => value.toString(16).padStart(2,'0')).join('')}`;
+  if (fields !== undefined || number !== undefined) metadata.content = await sealArchiveBytes(record.account,encoder.encode(JSON.stringify({fields,number})),`record:${record.key}`,true);
+  if (detail !== undefined) metadata.detailContent = await sealArchiveBytes(record.account,encoder.encode(JSON.stringify(detail)),`detail:${record.key}`,true);
+  for (const field of ['fingerprint','detailRevision']) if (metadata[field] && !metadata[field].startsWith('sha256:')) {
+    metadata[field] = `sha256:${pack(await crypto.subtle.digest('SHA-256',encoder.encode(metadata[field]))).map(value => value.toString(16).padStart(2,'0')).join('')}`;
   }
   return metadata;
 }
-export async function openRecord(record, {details = true} = {}) {
+export async function openRecord(record, {details = true, capture = false} = {}) {
   if (!record || !record.content && !record.detailContent) return record;
-  const raw = await vaultKey(record.account);
   const result = {...record};
-  if (record.content) Object.assign(result,JSON.parse(decoder.decode(await openBytes(raw,record.content,`record:${record.key}`))));
-  if (details && record.detailContent) result.detail = JSON.parse(decoder.decode(await openBytes(raw,record.detailContent,`detail:${record.key}`)));
+  if (record.content) Object.assign(result,JSON.parse(decoder.decode(await openArchiveBytes(record.account,record.content,`record:${record.key}`,capture))));
+  if (details && record.detailContent) {
+    try { result.detail = JSON.parse(decoder.decode(await openArchiveBytes(record.account,record.detailContent,`detail:${record.key}`,capture))); }
+    catch (error) {
+      // A pending document from a previous browser session can resume from a fresh detail response.
+      if (!capture || error.code !== 'ARCHIVE_CAPTURE_REFRESH') throw error;
+    }
+  }
   return result;
+}
+
+/** Public-key envelopes allow saving while the password-protected private key stays locked. */
+export async function sealArchiveBytes(account, value, context, capture = false) {
+  const session = capture ? await captureSession(account) : null;
+  const raw = session?.key || pack(random(32));
+  const cacheKey = session && `${account}:${session.id}`;
+  if (cacheKey && !captureEnvelopes.has(cacheKey)) {
+    captureEnvelopes.set(cacheKey,wrapFileKey(account,raw).catch(error => { captureEnvelopes.delete(cacheKey); throw error; }));
+    while (captureEnvelopes.size > 64) captureEnvelopes.delete(captureEnvelopes.keys().next().value);
+  }
+  const wrappedKey = cacheKey ? await captureEnvelopes.get(cacheKey) : await wrapFileKey(account,raw);
+  return {...await sealBytes(raw,value,context),wrappedKey,...(session ? {capture:{id:session.id}} : {})};
+}
+
+/** Viewer reads always require the private key; writer reads may use this session's fresh data. */
+export async function openArchiveBytes(account, envelope, context, capture = false) {
+  let raw;
+  if (capture && envelope.capture) {
+    const session = await captureSession(account);
+    if (session.id === envelope.capture.id) raw = session.key;
+  }
+  if (!raw) {
+    try {
+      const master = await vaultKey(account);
+      if (!envelope.wrappedKey) raw = master;
+      else {
+        const key = `${account}:${envelope.wrappedKey.join(',')}`;
+        if (!openedEnvelopes.has(key)) {
+          openedEnvelopes.set(key,unwrapFileKey(account,envelope.wrappedKey).catch(error => { openedEnvelopes.delete(key); throw error; }));
+          while (openedEnvelopes.size > 64) openedEnvelopes.delete(openedEnvelopes.keys().next().value);
+        }
+        raw = await openedEnvelopes.get(key);
+      }
+    }
+    catch (error) {
+      if (capture && error.code === 'OFFLINE_LOCKED') throw Object.assign(new Error('A fresh portal list is needed to continue this saved record.'),{code:'ARCHIVE_CAPTURE_REFRESH'});
+      throw error;
+    }
+  }
+  return openBytes(raw,envelope,context);
+}
+
+export async function captureReadAccess(account) {
+  const session = await captureSession(account);
+  let unlocked = false;
+  try { await vaultKey(account); unlocked = true; }
+  catch (error) { if (error.code !== 'OFFLINE_LOCKED') throw error; }
+  return record => unlocked || !record.content || record.content.capture?.id === session.id;
 }
 
 export async function wrapFileKey(account, raw) {
@@ -221,6 +276,7 @@ export async function unwrapFileKey(account, wrapped) {
 }
 
 export async function clearVault(account = null) {
+  captureEnvelopes.clear(); openedEnvelopes.clear();
   const transaction = (await database()).transaction('accounts','readwrite');
   if (account === null) transaction.objectStore('accounts').clear(); else transaction.objectStore('accounts').delete(account);
   await new Promise((resolve,reject) => { transaction.oncomplete = resolve; transaction.onabort = () => reject(transaction.error); });
@@ -228,4 +284,5 @@ export async function clearVault(account = null) {
   const saved = (await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY] || {};
   if (account !== null) delete saved[account];
   await chrome.storage.session.set({[SESSION_KEY]:account === null ? {} : saved});
+  await clearCaptureSessions(account);
 }

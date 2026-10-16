@@ -18,6 +18,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
 } = {}) {
   let disposed = false, busy = false, timer, controller, releaseLeadership;
   let retry = 15000;
+  let previewCacheChecked = false;
   let memory = store.read().monitor || {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
   const schedule = delay => { clearTimeout(timer); if (!disposed) timer = setTimeout(tick,delay); };
   async function checkpoint() {
@@ -27,6 +28,26 @@ export function createNotificationMonitor(store, repository, notices, accountNam
     const pageSize = Math.max(5,Math.min(100,Number(document.querySelector?.('[name="mytable_length"]')?.value) || memory.pageSize || 10));
     memory.pageSize = pageSize; repository.setPageSize?.(pageSize);
     return previewQueue(memory.records, pageSize);
+  }
+  async function restoreWarmup(signal) {
+    if (previewCacheChecked) return;
+    const byKey = new Map(memory.records.map(record => [`${record.kind}:${record.id}`,record]));
+    const completed = memory.warmup.queue
+      ? memory.warmup.queue.slice(0,memory.warmup.cursor)
+      : memory.warmup.completedAt ? warmupQueue() : [];
+    for (const key of completed) {
+      const record = byKey.get(key);
+      if (!record || memory.checked[key]?.retryAt > Date.now()) continue;
+      if (repository.hasFresh && !await repository.hasFresh(record.url)) {
+        signal.throwIfAborted();
+        memory.warmup = {queue:warmupQueue(),cursor:0,startedAt:Date.now()};
+        diagnosticLog('warmup-cache-restored',{reason:'Saved schedule has no matching fresh previews.'});
+        activity.note('preview-cache-missing','Preparing hover previews before notification checks; the saved schedule outlived its preview cache.',0);
+        await checkpoint(); break;
+      }
+    }
+    signal.throwIfAborted();
+    previewCacheChecked = true;
   }
   async function observe(record, signal, purpose, documents = false, reason) {
     const key = `${record.kind}:${record.id}`, previous = memory.checked[key];
@@ -63,7 +84,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         const release = await acquireLock(`${store.key}:monitor`,{wait:false,onLost:() => { releaseLeadership = null; controller?.abort(); schedule(5000); }});
         if (disposed || signal.aborted) { release?.(); return; }
         releaseLeadership = release;
-        if (release) memory = store.read().monitor || memory;
+        if (release) { memory = store.read().monitor || memory; previewCacheChecked = false; }
       }
       if (!releaseLeadership) { activity.pause('other-tab'); schedule(5000); return; }
       if (!memory.indexedAt || Date.now()-memory.indexedAt >= INDEX_FRESH_MS) {
@@ -84,6 +105,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         activity.note(`index:${memory.indexedAt}`,`Lists checked: ${index.filter(record => record.kind === 'sample').length} Sample, ${index.filter(record => record.kind === 'tir').length} TIR. Unchanged verified details are reused.`);
       }
       memory.warmup ||= {}; memory.tir ||= {};
+      await restoreWarmup(signal);
       if (!memory.warmup.queue && (!memory.warmup.completedAt || Date.now() >= memory.warmup.completedAt+PREVIEW_FRESH_MS)) {
         memory.warmup = {queue:warmupQueue(),cursor:0,startedAt:Date.now()}; await checkpoint();
       }
@@ -106,7 +128,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
       const next = nextNotificationRead(memory);
       if (next) {
         if (next.rotation.count === 1) {
-          const reason = {baseline:'first verified snapshot','status-change':'status changed',retry:'retrying a failed check'}[next.reason];
+          const reason = {baseline:'first successful check needed','status-change':'status changed',retry:'retrying a failed check'}[next.reason];
           activity.note(`discovery:${next.record.kind}:${next.reason}`,`Notification backlog: ${next.record.kind === 'sample' ? 'Sample' : 'TIR'} batch, up to ${memory.pageSize} records (${next.remaining} pending). Purpose: ${reason}.`,0);
         }
         activity.resume(); await observe(next.record,signal,'notification',next.record.kind === 'tir',next.reason);
@@ -147,7 +169,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
   const reset = (changes,area) => {
     const value = changes['islandsun.archive-reset']?.newValue;
     if (area !== 'local' || !value || value.account && value.account !== store.account) return;
-    controller?.abort(); memory = {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
+    controller?.abort(); previewCacheChecked = false; memory = {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
     repository.clear?.(); checkpoint().catch(()=>{}); schedule(1000);
   };
   globalThis.chrome?.storage?.onChanged?.addListener(reset);

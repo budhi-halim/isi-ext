@@ -37,13 +37,15 @@ export async function readMonitorIndex(kind, signal, accountName) {
 
 export async function readMonitoredRecord(record, repository, signal, options = {}) {
   rememberRequestNumber(record.url, record.number);
+  // Historical notification discovery must not evict the three pages reserved for previews.
+  const request = {signal,purpose:'notification',cacheResult:options.purpose === 'warmup',...options};
   if (record.kind === 'sample') {
-    const result = await repository.get(record.url, { signal, purpose:'notification', ...options });
+    const result = await repository.get(record.url, request);
     return { ...record, requestedCount: result.requestedCount, providedCount: result.providedCount };
   }
-  let result = await repository.get(record.url, { signal, maxAge: PREVIEW_FRESH_MS, purpose:'notification', ...options });
+  let result = await repository.get(record.url, {maxAge:PREVIEW_FRESH_MS,...request});
   // Older session entries contain only preview products.
-  if (!Array.isArray(result.documents)) result = await repository.get(record.url, { signal, purpose:'notification', ...options, fresh: true });
+  if (!Array.isArray(result.documents)) result = await repository.get(record.url, {...request,fresh:true});
   const documents = result.documents || [];
   if (!documents.length) throw new Error('documents-unavailable');
   return { ...record, documents };

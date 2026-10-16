@@ -369,8 +369,7 @@ function renderConnection(next) {
   connection = next;
   const unavailable = !navigator.onLine || next.hadOutage || unavailableSince && !connectionAvailable(next);
   $('#account-name').textContent = offlineIdentity?.name || 'Sign in required';
-  $('#connection').textContent = ({active:'Connected. Saving records in the background.',waiting:archiveWaitMessage(next.wait),paused:'Automatic archiving is paused.',offline:'The portal connection could not be confirmed. Saved records remain available.', 'signed-out':'Sign in to the portal to resume archiving.','unlock-required':'Unlock this account’s offline copy to resume saving.',attention:'Archiving needs attention.'})[next.state] || 'Waiting for the first connection check.';
-  $('#unlock-archive').hidden = next.state !== 'unlock-required';
+  $('#connection').textContent = ({active:'Connected. Saving records in the background.',waiting:archiveWaitMessage(next.wait),paused:'Automatic archiving is paused.',offline:'The portal connection could not be confirmed. Saved records remain available.', 'signed-out':'Sign in to the portal to resume archiving.','unlock-required':'Saving will resume automatically while you are signed in to the portal.',attention:'Archiving needs attention.'})[next.state] || 'Waiting for the first connection check.';
   if (next.error && next.state === 'attention') $('#connection').textContent += ` ${next.error}`;
   if (next.state === 'active' && !connectionAvailable(next)) $('#connection').textContent = 'Waiting for a current connection check. Saved records remain available.';
   if (unavailable) $('#connection').textContent = 'The portal is unavailable. Saving is paused while the connection is checked. Saved records remain available.';
@@ -409,7 +408,6 @@ const authentication = createOfflineAuthentication({
     offlineIdentity = identity; account = identity.account; revision++;
     debugCaptureUI.refresh();
     renderConnection(connection); restore();
-    if (connection.account === account && (connection.state === 'unlock-required' || connection.state === 'attention' && connection.error === 'Unlock this account’s offline copy to resume saving.')) checkConnection();
   },
   onLock({preserveLocation = false} = {}) {
     debugCaptureUI.clear();
@@ -430,7 +428,6 @@ const authentication = createOfflineAuthentication({
     $('#reporting-period').replaceChildren(new Option('All saved months',''));
   },
 });
-$('#unlock-archive').addEventListener('click',() => { authentication.lock(); $('#offline-password').focus(); });
 window.addEventListener('pagehide',event => {
   products.dismiss();
   debugCaptureUI.clear();

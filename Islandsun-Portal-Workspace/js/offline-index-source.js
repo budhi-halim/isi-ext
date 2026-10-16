@@ -1,5 +1,5 @@
 import { archiveMeta, readArchive, openArchive } from './offline-store.js';
-import { sealBytes, openBytes, vaultKey } from './offline-vault.js';
+import { sealArchiveBytes, openArchiveBytes } from './offline-vault.js';
 import { capturedText } from './debug-capture-data.js';
 import { PAGED_SOURCES } from './offline-pagination.js';
 
@@ -16,7 +16,7 @@ export async function saveIndexSource({account,kind,text,request,scan,capturedAt
     requestBody:request.options.body,cursor:scan.cursor,verify:!!scan.verify,
     text:captured.text,redactions:captured.redactions};
   const compressed = await new Response(new Blob([JSON.stringify(source)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
-  const encrypted = await sealBytes(await vaultKey(account),compressed,context(account,kind));
+  const encrypted = await sealArchiveBytes(account,compressed,context(account,kind));
   signal?.throwIfAborted();
   const requestBytes = new TextEncoder().encode(JSON.stringify([request.url,request.options.method,request.options.body]));
   const requestKey = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',requestBytes)),byte => byte.toString(16).padStart(2,'0')).join('');
@@ -50,7 +50,7 @@ export async function retainFailedIndexSource(entry,signal) {
 export async function readIndexSource(account,kind,failed = false) {
   const entry = await readArchive('meta',indexSourceKey(account,kind,failed));
   if (!entry || entry.account !== account || entry.kind !== kind) return null;
-  const compressed = await openBytes(await vaultKey(account),entry.encrypted,context(account,kind));
+  const compressed = await openArchiveBytes(account,entry.encrypted,context(account,kind));
   const text = await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
   const source = JSON.parse(text);
   return source.account === account && source.kind === kind ? source : null;

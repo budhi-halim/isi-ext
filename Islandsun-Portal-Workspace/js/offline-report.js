@@ -25,7 +25,7 @@ export function coverageState(source, now = Date.now()) {
 export function captureStatus(connection, settings, wait) {
   if (!settings.enabled || !settings.offlineArchive) return 'Automatic saving is paused.';
   if (connection === 'waiting') return archiveWaitMessage(wait);
-  return {'signed-out':'Automatic saving needs online sign-in.','unlock-required':'Unlock this account’s offline copy to resume saving.',offline:'The portal is unavailable; saved records remain accessible.',attention:'Automatic saving needs attention; check the affected sections.'}[connection] || 'Automatic saving is enabled.';
+  return {'signed-out':'Automatic saving needs online sign-in.','unlock-required':'Saving will resume automatically while you are signed in to the portal.',offline:'The portal is unavailable; saved records remain accessible.',attention:'Automatic saving needs attention; check the affected sections.'}[connection] || 'Automatic saving is enabled.';
 }
 
 /** Scan one account in bounded batches; never export record content or identifiers. */

@@ -1,5 +1,5 @@
 import { capturedText, safeRequestUrl } from './debug-capture-data.js';
-import { vaultKey, sealBytes, openBytes } from './offline-vault.js';
+import { vaultKey, sealArchiveBytes, openArchiveBytes } from './offline-vault.js';
 
 export const JOURNAL_LIMITS = Object.freeze({ days: 7, events: 150000, bytes: 128 * 1024 * 1024 });
 const DATABASE = 'islandsun-diagnostic-journal';
@@ -71,8 +71,8 @@ export async function appendJournal(account, event, fields = {}, at = Date.now()
       stored = await result(db.transaction('bodies').objectStore('bodies').get(source.key));
       if (!stored) {
         try {
-          const sealed = await sealBytes(await vaultKey(entry.account), source.bytes, `journal:${source.key}`);
-          stored = { key: source.key, account: entry.account, hash: source.hash, sealed, size: sealed.data.byteLength + 512 };
+          const sealed = await sealArchiveBytes(entry.account, source.bytes, `journal:${source.key}`);
+          stored = { key: source.key, account: entry.account, hash: source.hash, sealed, size: sealed.data.byteLength + sealed.wrappedKey.length * 4 + 512 };
         } catch (error) {
           delete entry.body.source;
           entry.body.omitted = error.code === 'OFFLINE_LOCKED' ? 'archive-locked' : 'response-storage-unavailable';
@@ -184,7 +184,7 @@ export async function journalExport(account, context = {}) {
       for (const row of rows) {
         const { size, sealed, ...value } = row;
         if (sealed) {
-          try { value.content = key ? JSON.parse(new TextDecoder().decode(await openBytes(key, sealed, `journal:${row.key}`))) : { omitted: 'archive-locked' }; }
+          try { value.content = key ? JSON.parse(new TextDecoder().decode(await openArchiveBytes(account, sealed, `journal:${row.key}`))) : { omitted: 'archive-locked' }; }
           catch { value.content = { omitted: 'response-cannot-be-decrypted' }; }
         }
         chunks.push((count++ ? ',' : '') + JSON.stringify(value));
@@ -203,6 +203,6 @@ export function diagnosticFields(value, depth = 0) {
   if (typeof value === 'string') return value.slice(0, 16000);
   if (Array.isArray(value)) return value.slice(0, 200).map(item => diagnosticFields(item, depth + 1));
   if (typeof value !== 'object') return String(value);
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !/password|passwd|token|secret|authorization|cookie|vaultKey|privateKey/i.test(key)).map(([key, item]) => [key,
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !/password|passwd|token|secret|authorization|cookie|vaultKey|privateKey|captureSession/i.test(key)).map(([key, item]) => [key,
     /url$/i.test(key) && typeof item === 'string' ? safeRequestUrl(item) : diagnosticFields(item, depth + 1)]));
 }

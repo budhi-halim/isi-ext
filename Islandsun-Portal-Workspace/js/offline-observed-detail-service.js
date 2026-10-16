@@ -34,7 +34,7 @@ export async function retainObservedDetail(message, sender, {readSettings, parse
   };
   if (!await permitted()) return false;
   const key = archiveKey(message.account,identity.kind,identity.id);
-  const record = await readVisibleRecord(key,message.account,identity.kind);
+  const record = await readVisibleRecord(key,message.account,identity.kind,{capture:true});
   if (!record || JSON.stringify(recordIdentity(record.detailUrl)) !== JSON.stringify(identity)
     || record.detailAt >= message.observedAt || record.rawDetailAt >= message.observedAt) return false;
   if ((await parse('identity',{html:message.html}))?.account !== message.account || !await permitted()) return false;
@@ -55,7 +55,7 @@ export async function retainObservedDetail(message, sender, {readSettings, parse
   })) return false;
   // The durable document checkpoint lets the normal worker resume without another detail fetch.
   if (!settings.offlineDocuments) {
-    const saved = await readVisibleRecord(key,message.account,identity.kind);
+    const saved = await readVisibleRecord(key,message.account,identity.kind,{capture:true});
     if (saved?.detailAt === message.observedAt) await completeDetailCapture(saved);
   }
   return true;

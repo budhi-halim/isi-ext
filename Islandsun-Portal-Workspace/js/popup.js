@@ -42,7 +42,7 @@ async function render() {
       : 'Waiting for the first session check. It should start within a minute.';
     $('#offline-status').textContent = !settings.offlineArchive ? 'Archiving paused. Your saved copy is still available.'
       : offline.account && offline.account !== account ? 'The offline copy fills in while you are signed in.'
-      : ({active:'Saving records and documents for offline access.',waiting:'Archiving waits while you edit or the portal is busy.',offline:'The portal connection could not be confirmed. Your saved copy is available.', 'signed-out':'Sign in to resume saving offline records.','unlock-required':'Open the saved offline copy and unlock it to resume saving.',attention:'Archive needs attention. Open the saved copy for details.'})[offline.state] || 'The offline copy fills in while you are signed in.';
+      : ({active:'Saving records and documents for offline access.',waiting:'Archiving waits while you edit or the portal is busy.',offline:'The portal connection could not be confirmed. Your saved copy is available.', 'signed-out':'Sign in to resume saving offline records.','unlock-required':'Saving will resume automatically while you are signed in to the portal.',attention:'Archive needs attention. Open the saved copy for details.'})[offline.state] || 'The offline copy fills in while you are signed in.';
   } catch { $('#message').textContent = 'Settings could not be loaded. Reopen the extension.'; }
 }
 
