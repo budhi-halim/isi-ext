@@ -5,6 +5,7 @@ import { UPDATE_PAGE } from './shared/update-logic.js';
 import { notificationTone } from './submission-logic.js';
 import { createTrayClearMotion } from './tray-clear-motion.js';
 import { submissionRecord } from './submission-logic.js';
+import { silenceDescription } from './notification-types.js';
 
 function destination(item) {
   if (item.type === 'update' && item.url === UPDATE_PAGE) return UPDATE_PAGE;
@@ -49,11 +50,11 @@ export function createNotificationCenter(store, notices) {
   function mute(item) {
     if (confirmation) return;
     confirmation = document.createElement('dialog'); confirmation.className = 'isi-portal-products'; confirmation.dataset.isiOwned = '';
-    const title = document.createElement('h2'); title.id = 'isi-mute-title'; title.textContent = 'Stop reminders?';
-    const text = document.createElement('p'); text.textContent = 'You will no longer receive overdue reminders for this document or sample request on this browser.';
+    const title = document.createElement('h2'); title.id = 'isi-mute-title'; title.textContent = 'Silence this notification type?';
+    const text = document.createElement('p'); text.textContent = silenceDescription(item);
     const actions = document.createElement('div'); actions.className = 'isi-dialog-actions';
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'isi-portal-button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', closeConfirmation);
-    const confirm = document.createElement('button'); confirm.type = 'button'; confirm.className = 'isi-portal-button'; confirm.textContent = 'Stop reminders';
+    const confirm = document.createElement('button'); confirm.type = 'button'; confirm.className = 'isi-portal-button'; confirm.textContent = 'Silence';
     confirm.addEventListener('click', async () => {
       confirm.disabled = true;
       try { await store.dismiss(item.id, true); closeConfirmation(); }
@@ -140,7 +141,7 @@ export function createNotificationCenter(store, notices) {
       text.textContent = item.message; time.dateTime = new Date(item.created).toISOString(); time.textContent = new Date(item.created).toLocaleString();
       content.append(text, time);
       const actions = document.createElement('div'); actions.className = 'isi-notice-actions';
-      if (item.muteKey) actions.append(iconButton('mute', 'Never remind me again', () => mute(item)));
+      if (item.muteKey) actions.append(iconButton('mute', 'Silence this notification type', () => mute(item)));
       actions.append(iconButton('close', 'Dismiss notification', () => dismiss(item.id))); row.append(mark, content, actions); list.append(row);
       rows.set(item.id, row);
       if (dialog.open) listMotion.enter(row);

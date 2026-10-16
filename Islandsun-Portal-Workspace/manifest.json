@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Islandsun Portal Workspace",
-  "version": "1.4.64",
+  "version": "1.4.67",
   "description": "An Islandsun workspace with product previews, document downloads, notifications, and a protected offline copy.",
   "permissions": [
     "downloads",

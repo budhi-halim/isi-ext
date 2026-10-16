@@ -1,7 +1,14 @@
+import { notificationMuteKey } from './notification-types.js';
+
 const SUBMISSION_WARNINGS = new Set(['rollback', 'rejected', 'cancelled']);
 
 /** Remove superseded notices from a writable state snapshot without retaining a history. */
 export function pruneNotificationState(state) {
+  for (const [id, notice] of Object.entries(state.notices)) {
+    notice.muteKey = notificationMuteKey(notice);
+    if (notice.muteKey && state.muted[notice.muteKey]) delete state.notices[id];
+    else if (notice.type === 'unsubmitted' && !state.drafts?.[notice.key]?.eligible) delete state.notices[id];
+  }
   const latestWarnings = new Map();
   for (const notice of Object.values(state.notices)) {
     if (!SUBMISSION_WARNINGS.has(notice.type)) continue;

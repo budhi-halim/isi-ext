@@ -1,9 +1,7 @@
 import { createToastCard } from './toast-card.js';
 import { createNoticeMotion } from './notice-motion.js';
 
-const NORMAL_DURATION = 7000;
-const IMPORTANT_DURATION = 12000;
-const MAXIMUM_DURATION = 30000;
+const TOAST_DURATION = 7000;
 
 /** A bounded transient queue; persistent history remains the caller's responsibility. */
 export function createNotifications(host, { visibleOnly = false, toastClass = '' } = {}) {
@@ -19,7 +17,7 @@ export function createNotifications(host, { visibleOnly = false, toastClass = ''
     if (claiming?.key === key) claiming.cancelled = true;
     const entry = entries.get(key);
     if (!entry || entry.closing) return;
-    entry.closing = true; clearTimeout(entry.timer); clearTimeout(entry.deadlineTimer);
+    entry.closing = true; clearTimeout(entry.timer);
     if (user) entry.onDismiss?.();
     motion.remove(entry.node, () => { entries.delete(key); pump(); });
   }
@@ -39,21 +37,19 @@ export function createNotifications(host, { visibleOnly = false, toastClass = ''
         const { key, message, tone, onMute } = request;
         const node = createToastCard(message, { tone, href:request.href, customer:request.customer, onDismiss: () => dismiss(key, true), onMute });
         if (toastClass) node.classList.add(toastClass);
-        const entry = { ...request, node, timer: null, remaining:['error','warning'].includes(tone) ? IMPORTANT_DURATION : NORMAL_DURATION, deadlineRemaining:MAXIMUM_DURATION, startedAt:0, hovered:false };
+        const entry = { ...request, node, timer: null, remaining:TOAST_DURATION, startedAt:null, hovered:false };
         entries.set(key, entry); host.append(node); motion.enter(node);
         const pause = () => {
-          if (entry.startedAt) {
-            const elapsed = Date.now()-entry.startedAt;
-            entry.remaining = Math.max(0,entry.remaining-elapsed); entry.deadlineRemaining = Math.max(0,entry.deadlineRemaining-elapsed);
+          if (entry.startedAt !== null) {
+            entry.remaining = Math.max(0,entry.remaining-(performance.now()-entry.startedAt));
           }
-          entry.startedAt = 0; clearTimeout(entry.timer); clearTimeout(entry.deadlineTimer);
+          entry.startedAt = null; clearTimeout(entry.timer);
         };
         const schedule = () => {
-          if (entry.startedAt || entry.closing || document.hidden || entry.hovered || node.contains(document.activeElement)) return;
-          if (entry.remaining <= 0 || entry.deadlineRemaining <= 0) { dismiss(key); return; }
-          entry.startedAt = Date.now();
+          if (entry.startedAt !== null || entry.closing || document.hidden || entry.hovered || node.contains(document.activeElement)) return;
+          if (entry.remaining <= 0) { dismiss(key); return; }
+          entry.startedAt = performance.now();
           entry.timer = setTimeout(() => dismiss(key),entry.remaining);
-          entry.deadlineTimer = setTimeout(() => dismiss(key),entry.deadlineRemaining);
         };
         entry.schedule = schedule; entry.pause = pause;
         node.addEventListener('pointerenter', () => { entry.hovered = true; pause(); });
@@ -89,7 +85,7 @@ export function createNotifications(host, { visibleOnly = false, toastClass = ''
       for (const item of queue.splice(0)) item.onSkip?.();
       window.removeEventListener('focus', resume); document.removeEventListener('visibilitychange', resume);
       motion.destroy();
-      for (const entry of entries.values()) { clearTimeout(entry.timer); clearTimeout(entry.deadlineTimer); entry.node.remove(); }
+      for (const entry of entries.values()) { clearTimeout(entry.timer); entry.node.remove(); }
       entries.clear(); if (owned) host.remove();
     },
   };

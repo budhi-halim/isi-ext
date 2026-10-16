@@ -16,6 +16,7 @@ import { createPresentationJournal } from './presentation-journal.js';
 import { cancelMotion } from './motion.js';
 import { needsEnhancement } from './portal-observer.js';
 import { createSubmissionTracking } from './submission-tracking.js';
+import { createSavedRequestTracking } from './saved-request-tracking.js';
 import { createSampleFormControls } from './sample-form-controls.js';
 import { createImprovementPrefill } from './improvement-prefill.js';
 import { applyDefaultFilterDate } from './filter-dates.js';
@@ -73,7 +74,7 @@ async function start() {
   const operationalForms = createOperationalForms();
   const tirForm = createTirForm();
   const calendar = createCalendarPresentation();
-  let store, center, monitor, combinedStore, submissions;
+  let store, center, monitor, combinedStore, submissions, saves;
   let accountPaused = false;
   function checkAccount(scope) {
     if (!account || !scope || scope.account === account || accountPaused) return;
@@ -81,7 +82,7 @@ async function start() {
     saveSubmit.destroy();
     improvementPrefill.destroy();
     observedTable.destroy();
-    monitor?.destroy(); submissions?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy();
+    monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy();
     products.destroy(); repository.destroy(); setOfflineAccount(null);
     notices.notify('The signed-in account changed. Reload this page before continuing.',{key:'account-changed',tone:'warning'});
   }
@@ -90,6 +91,7 @@ async function start() {
     chrome.runtime.sendMessage({type:'portal-session-active'}).catch(()=>{});
     store = createNotificationStore(account, { onError: () => notices.notify('Notification history is unavailable. Your records have not changed.', { error: true }) });
     submissions = createSubmissionTracking(store, () => notices.notify('This submission could not be tracked for notifications. Check its status in the request list.', { error: true }));
+    saves = createSavedRequestTracking(store, () => notices.notify('The reminder for this save could not be recorded. Check its status in the request list.', {error:true}));
     combinedStore = withUpdateNotifications(store);
     center = createNotificationCenter(combinedStore, notices);
     const accountName = document.querySelector('.user-menu > a')?.textContent.trim().replace(/\s+/g, ' ');
@@ -124,7 +126,7 @@ async function start() {
     chrome.storage.onChanged.removeListener(accountChanged);
     document.removeEventListener('islandsun-table-draw', enhance);
     clearTimeout(timer); observer.disconnect(); dropdownTranslation.destroy(); theme?.destroy({ preserveScheme: preservePresentation });
-    monitor?.destroy(); submissions?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy();
+    monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy();
     improvementPrefill.destroy(); saveSubmit.destroy(preservePresentation); validation.destroy(); unsavedChanges.destroy(); editMode.destroy(); dialogs.destroy();
     modalAccessibility.destroy(); textareaLimits.destroy(); documents.destroy(); products.destroy(); navigation.destroy(); notices.destroy(); calendar.destroy(); cancelMotion(); releaseTableControls(); operationalForms.destroy(); tirForm.destroy(); journal.restore(); sampleForms.destroy(); teardown = null;
     document.querySelector('#isi-portal-theme')?.closest('[data-isi-owned]')?.remove();

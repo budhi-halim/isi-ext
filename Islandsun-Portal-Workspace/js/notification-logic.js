@@ -1,21 +1,12 @@
 import { monitorDetailsEligible } from './submission-logic.js';
 import { pruneNotificationState } from './notification-relevance.js';
-
-const DAY = 86400000;
-const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-
-export function calendarDay(value) {
-  const text = String(value ?? '').trim();
-  const named = /^(\d{1,2})-([a-z]{3})-(\d{4})$/i.exec(text);
-  const iso = named ? `${named[3]}-${String(MONTHS.indexOf(named[2].toLowerCase()) + 1).padStart(2,'0')}-${named[1].padStart(2,'0')}` : text.slice(0,10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const stamp = Date.parse(`${iso}T00:00:00Z`);
-  return Number.isFinite(stamp) && new Date(stamp).toISOString().slice(0,10) === iso ? stamp / DAY : null;
-}
+import { calendarDay, localCalendarDate } from './calendar-day.js';
+import { notificationMuteKey } from './notification-types.js';
+export { calendarDay } from './calendar-day.js';
 
 export function emptyNotificationState() { return { version: 1, jobs: {}, notices: {}, muted: {} }; }
 
-function noticeChannel(item) { return `${item.key}:${item.type}:${item.documentId || item.muteKey || ''}`; }
+function noticeChannel(item) { return `${item.key}:${item.type}:${item.documentId || (item.type === 'overdue' ? item.muteKey : '') || ''}`; }
 
 export function acknowledgeNotices(state, items) {
   state.acknowledged ||= {};
@@ -26,12 +17,14 @@ export function acknowledgeNotices(state, items) {
 }
 
 /** Apply one verified record snapshot. Failed/missing snapshots never imply completion. */
-export function observeRecord(previous, record, { now = Date.now(), today = new Date().toLocaleDateString('en-CA') } = {}) {
+export function observeRecord(previous, record, { now = Date.now(), today = localCalendarDate(now) } = {}) {
   const state = structuredClone(previous);
   const key = `${record.kind}:${record.id}`;
   const known = state.jobs[key];
   const notify = (id, message, extra = {}) => {
     const item = { id, key, number:record.number, message, created: now, url: record.url, customer:record.customer || '', ...extra };
+    item.muteKey = notificationMuteKey(item);
+    if (state.muted[item.muteKey]) return;
     if (state.acknowledged?.[noticeChannel(item)]?.id === id) return;
     if (!state.notices[id]) state.notices[id] = item;
   };

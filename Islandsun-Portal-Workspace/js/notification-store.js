@@ -3,11 +3,13 @@ import { acquireLocalLock } from './local-lock.js';
 import { registerSubmission, observeSubmissionStatuses, submissionRecord, SUBMISSION_INTENT_LIFETIME } from './submission-logic.js';
 import { pruneNotificationState } from './notification-relevance.js';
 import { diagnosticLog } from './diagnostic-log.js';
+import { registerSaveAttempt, observeDraftStatuses, advanceDraftReminders } from './draft-reminders.js';
 
 /** A same-origin lock serializes localStorage updates across portal tabs. */
 export function createNotificationStore(account, { storage = localStorage, locks = navigator.locks, onError = () => {} } = {}) {
   const key = `islandsun.portal.notifications.v1:${encodeURIComponent(account)}`;
   const outboxPrefix = `${key}:submission:`;
+  const savePrefix = `${key}:save:`;
   const listeners = new Set();
   const owner = [...crypto.getRandomValues(new Uint32Array(4))].join('-');
   let disposed = false;
@@ -23,7 +25,7 @@ export function createNotificationStore(account, { storage = localStorage, locks
     const entries = [];
     for (let index = 0; index < storage.length; index++) {
       const name = storage.key(index);
-      if (name?.startsWith(outboxPrefix)) entries.push(name);
+      if (name?.startsWith(outboxPrefix) || name?.startsWith(savePrefix)) entries.push(name);
     }
     return entries;
   }
@@ -33,11 +35,19 @@ export function createNotificationStore(account, { storage = localStorage, locks
       let previous = read();
       const before = JSON.stringify(previous), pending = pendingIntents();
       for (const name of pending) {
-        try { previous = registerSubmission(previous, JSON.parse(storage.getItem(name))); } catch { /* A malformed outbox entry cannot become a submission. */ }
+        try {
+          previous = (name.startsWith(savePrefix) ? registerSaveAttempt : registerSubmission)(previous, JSON.parse(storage.getItem(name)));
+        } catch { /* A malformed outbox entry cannot become a save or submission. */ }
       }
       const next = pruneNotificationState(transform(previous)), after = JSON.stringify(next);
       for (const [id,item] of Object.entries(next.notices)) if (!previous.notices[id]) diagnosticLog('notification-created',{id,key:item.key,type:item.type,customer:item.customer});
       for (const id of Object.keys(previous.notices)) if (!next.notices[id]) diagnosticLog('notification-removed',{id});
+      for (const [recordKey, item] of Object.entries(next.submissions || {})) {
+        if (item.confirmed && !previous.submissions?.[recordKey]?.confirmed) diagnosticLog('submission-confirmed', {kind:item.kind,number:item.number,key:recordKey});
+      }
+      for (const [recordKey, item] of Object.entries(next.drafts || {})) {
+        if (item.savedAt !== previous.drafts?.[recordKey]?.savedAt) diagnosticLog('draft-save-observed', {key:recordKey,number:item.number,savedAt:item.savedAt,reminderAt:item.savedAt+300000});
+      }
       if (after !== before) storage.setItem(key, after);
       for (const name of pending) storage.removeItem(name);
       if (after !== before) publish();
@@ -51,7 +61,7 @@ export function createNotificationStore(account, { storage = localStorage, locks
   }
   const changed = event => {
     if (event.key === key) { try { publish(); } catch (error) { onError(error); } }
-    else if (event.key?.startsWith(outboxPrefix) && event.newValue) update(state => state).catch(() => {});
+    else if ((event.key?.startsWith(outboxPrefix) || event.key?.startsWith(savePrefix)) && event.newValue) update(state => state).catch(() => {});
   };
   window.addEventListener('storage', changed);
   try {
@@ -61,6 +71,19 @@ export function createNotificationStore(account, { storage = localStorage, locks
   return {
     key, read, account,
     saveMonitor: monitor => update(state => ({...state,monitor})),
+    registerSave(record) {
+      if (disposed || !['sample','tir'].includes(record.kind)) return;
+      if (pendingIntents().length >= 64) throw new Error('Save tracking is busy.');
+      const state = read(), token = [...crypto.getRandomValues(new Uint32Array(4))].join('-');
+      const intent = {...record, token, created:Date.now()};
+      if (record.kind === 'tir' && !record.id && !intent.beforeIds && state.monitor?.indexedAt) {
+        intent.beforeIds = state.monitor.records.filter(item => item.kind === 'tir').map(item => item.id);
+      }
+      storage.setItem(`${savePrefix}${token}`, JSON.stringify(intent));
+      diagnosticLog('save-intent', {kind:record.kind,id:record.id,number:record.number,created:intent.created});
+      update(state => state).catch(() => {});
+    },
+    advanceReminders: options => update(state => advanceDraftReminders(state, options)),
     registerSubmission(record) {
       if (disposed) return;
       const valid = submissionRecord(record);
@@ -73,12 +96,13 @@ export function createNotificationStore(account, { storage = localStorage, locks
       if (pendingIntents().length >= 64) throw new Error('Submission tracking is busy.');
       const token = [...crypto.getRandomValues(new Uint32Array(4))].join('-');
       storage.setItem(`${outboxPrefix}${token}`, JSON.stringify({ ...valid, token, created: now }));
+      diagnosticLog('submission-intent', {kind:valid.kind,id:valid.id,number:valid.number,created:now});
       update(state => state).catch(() => {});
     },
     observeStatuses: (records, options = {}) => update(state => {
       const observedAt = options.observedAt ?? Date.now();
       if (options.source !== 'page' && observedAt < (state.submissionIndexAt || 0)) return state;
-      const next = observeSubmissionStatuses(state, records, { ...options, observedAt });
+      const next = observeSubmissionStatuses(options.source === 'page' ? state : observeDraftStatuses(state, records, {...options, observedAt}), records, { ...options, observedAt });
       if (options.source !== 'page') next.submissionIndexAt = observedAt;
       return next;
     }),

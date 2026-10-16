@@ -26,7 +26,7 @@ export function createToastCard(message, { tone = 'success', href, customer, onD
     const button = document.createElement('button'); button.type = 'button'; button.className = 'isi-toast-button';
     button.setAttribute('aria-label', label); button.append(mark(name)); button.addEventListener('click', callback); actions.append(button);
   }
-  if (onMute) action('mute', 'Never remind me again', onMute);
+  if (onMute) action('mute', 'Silence this notification type', onMute);
   action('close', 'Dismiss notification', onDismiss);
   node.append(symbol, text, actions); return node;
 }

@@ -1,6 +1,7 @@
 import { PORTAL_ORIGIN } from './shared/document-names.js';
 import { requestDetailUrl, tirDetailUrl } from './logic.js';
 import { discardRecordNotices, pruneNotificationState } from './notification-relevance.js';
+import { notificationMuteKey } from './notification-types.js';
 
 export const SUBMISSION_INTENT_LIFETIME = 7 * 86400000;
 const RECORD_ID = /^[1-9]\d{0,11}$/;
@@ -16,14 +17,14 @@ export function submissionStage(kind, value) {
   const status = normalizedStatus(value);
   if ((kind === 'tir' ? ACTIVE_TIR : ACTIVE_SAMPLE).has(status)) return 'active';
   if (kind === 'tir' && status === 'PENDING' || kind === 'sample' && status === 'DRAFT') return 'rollback';
-  if (kind === 'tir' && status === 'REJECT') return 'rejected';
-  if (kind === 'sample' && status === 'CANCEL') return 'cancelled';
+  if (['REJECT', 'REJECTED'].includes(status)) return 'rejected';
+  if (['CANCEL', 'CANCELLED', 'CANCELED'].includes(status)) return 'cancelled';
   if (['COMPLETE', 'COMPLETED', 'COMPLETED BY SYSTEM'].includes(status)) return 'complete';
   return null;
 }
 
 export function notificationTone(type) {
-  return ['overdue', 'rollback', 'rejected', 'cancelled'].includes(type) ? 'warning' : 'success';
+  return ['unsubmitted', 'overdue', 'rollback', 'rejected', 'cancelled'].includes(type) ? 'warning' : 'success';
 }
 
 /** Status tracking needs draft/rejected rows; expensive document reads do not. */
@@ -41,7 +42,7 @@ export function submissionRecord(value) {
   try { url = new URL(value.url); } catch { return null; }
   const canonical = value.kind === 'tir' ? tirDetailUrl(value.id) : requestDetailUrl(value.id, url.searchParams.get('srtype'));
   if (url.origin !== PORTAL_ORIGIN || url.href !== canonical) return null;
-  return { kind: value.kind, id: String(value.id), number, url: canonical };
+  return { kind: value.kind, id: String(value.id), number, url: canonical, ...(value.customer ? {customer:String(value.customer).trim().slice(0, 300)} : {}) };
 }
 
 /** Match only the portal's observed marketing links on their own record page. */
@@ -70,7 +71,10 @@ export function registerSubmission(previous, intent, now = Date.now()) {
   if (current && (current.token === intent.token || current.created >= intent.created)) return previous;
   const state = structuredClone(previous);
   state.submissions ??= {};
+  state.submissionOutcomes ??= {};
   state.submissions[key] = { ...record, token: intent.token, created: intent.created, observed: intent.created, confirmed: false };
+  discardRecordNotices(state, key, ['unsubmitted']);
+  if (state.drafts?.[key]) state.drafts[key].submitAttemptAt = intent.created;
   return state;
 }
 
@@ -85,29 +89,45 @@ export function observeSubmissionStatuses(previous, records, { now = Date.now(),
     const record = submissionRecord(raw);
     if (!record) continue;
     const key = `${record.kind}:${record.id}`, stage = submissionStage(record.kind, raw.status), known = state.submissions[key];
-    if (!stage || observedAt < (known?.observed ?? 0)) continue;
+    const outcome = state.submissionOutcomes?.[key];
+    if (!stage || observedAt < Math.max(known?.observed ?? 0, outcome?.observed ?? 0)) continue;
     if (source === 'page') {
       // A previously opened detail tab can be stale. It may confirm its own pending intent,
       // but rollback/rejection is decided only from the serialized fresh index.
-      if (known && !known.confirmed && stage === 'active') state.submissions[key] = { ...known, confirmed: true, observed: observedAt };
+      if (known && !known.confirmed && stage === 'active') {
+        state.submissions[key] = { ...known, confirmed: true, observed: observedAt };
+        discardRecordNotices(state, key, ['unsubmitted']);
+        if (state.drafts) delete state.drafts[key];
+        if (state.submissionOutcomes) delete state.submissionOutcomes[key];
+      }
       continue;
     }
     if (stage === 'active') {
-      discardRecordNotices(state, key, ['rollback', 'rejected', 'cancelled']);
+      discardRecordNotices(state, key, ['unsubmitted', 'rollback', 'rejected', 'cancelled']);
+      if (state.drafts) delete state.drafts[key];
+      if (state.submissionOutcomes) delete state.submissionOutcomes[key];
       state.submissions[key] = { ...record, token: known?.token || `observed-${observedAt}`, created: known?.created ?? observedAt, confirmed: true, observed: observedAt };
     } else if (stage === 'complete') {
-      discardRecordNotices(state, key, ['rollback', 'rejected', 'cancelled']);
+      discardRecordNotices(state, key, ['unsubmitted', 'rollback', 'rejected', 'cancelled']);
+      if (state.drafts) delete state.drafts[key];
+      state.submissionOutcomes ||= {};
+      state.submissionOutcomes[key] = {token:known?.token || outcome?.token || `observed-${observedAt}`,stage,observed:observedAt};
       delete state.submissions[key];
     } else {
       discardRecordNotices(state, key, ['overdue', 'ready', 'complete']);
       delete state.jobs[key];
       const previousNotice = Object.values(state.notices).find(notice => notice.key === key && ['rollback', 'rejected', 'cancelled'].includes(notice.type));
-      if (!known?.confirmed && (!previousNotice || previousNotice.type === stage)) continue;
+      if (!known?.confirmed && (!previousNotice && !outcome || (previousNotice?.type || outcome?.stage) === stage)) continue;
       discardRecordNotices(state, key, ['rollback', 'rejected', 'cancelled']);
-      const id = `${key}:submission:${known?.token || `observed-${observedAt}`}:${stage}`;
+      const token = known?.token || outcome?.token || `observed-${observedAt}`;
+      const id = `${key}:submission:${token}:${stage}`;
       const message = stage === 'rollback' ? `${record.number}: returned to ${record.kind === 'tir' ? 'Pending' : 'Draft'} after submission to Product Marketing.`
         : `${record.number}: ${record.kind === 'tir' ? 'TIR rejected' : 'sample request cancelled'}.`;
-      state.notices[id] ??= { id, key, type: stage, message, created: now, url: record.url, customer:record.customer || '' };
+      const item = { id, key, number:record.number, type: stage, message, created: now, url: record.url, customer:record.customer || '' };
+      item.muteKey = notificationMuteKey(item);
+      if (!state.muted[item.muteKey]) state.notices[id] ??= item;
+      state.submissionOutcomes ||= {};
+      state.submissionOutcomes[key] = {token, stage, observed:observedAt};
       delete state.submissions[key];
     }
   }

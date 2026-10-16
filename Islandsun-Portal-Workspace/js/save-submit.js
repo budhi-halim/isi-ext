@@ -45,7 +45,7 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
     const save = [...buttons.keys()].find(button => button === event.target || button.contains(event.target));
     if (save?.form === active.form) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, {capture:true,signal:events.signal});
-  function start(save, contract) {
+  async function start(save, contract) {
     const form = save.form;
     if (disposed || active || locked.has(form) || !canEdit(form) || save.disabled) return;
     if (!save.dispatchEvent(new CustomEvent('islandsun-before-save', {bubbles:true,cancelable:true}))) return;
@@ -55,7 +55,8 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
     }
     const products = contract.kind === 'sample' ? sampleProductSnapshot(form) : undefined;
     if (products === null) { notify('Review the product list before using Save & Submit.', {error:true}); return; }
-    const pending = {account, ...contract, number, products, sourceUrl:current?.url};
+    const pending = {account, ...contract, number, products, sourceUrl:current?.url,
+      sampleType:contract.kind === 'sample' ? Number(form.querySelector('[name="srtype"]')?.value || new URL(location.href).searchParams.get('srtype')) : undefined};
     const transaction = createSaveSubmitFrame({form, pending, onSubmission, onSaved:() => onSaved?.(form),
       onCommitted() {
         locked.add(form);
@@ -65,6 +66,13 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
       onFinished() { delete form.dataset.isiSaveSubmit; syncButtons(); },
     });
     active = {form, transaction}; form.dataset.isiSaveSubmit = 'iframe'; syncButtons();
+    try { await transaction.prepare(); }
+    catch {
+      if (disposed || active?.transaction !== transaction) return;
+      cancelPrepared(); notify('Automatic submission could not be prepared. Nothing was saved. Try again or use Save.', {error:true}); return;
+    }
+    if (disposed || active?.transaction !== transaction) return;
+    if (!canEdit(form) || !form.isConnected || save.disabled) { cancelPrepared(); return; }
     try { save.click(); }
     catch { cancelPrepared(); notify('Save did not start. Review the form before trying again.', {error:true}); }
     if (active && !transaction.committed) timer = setTimeout(() => {
