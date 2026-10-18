@@ -11,7 +11,7 @@ export function documentBaseline(record, previous = {}, now = Date.now()) {
     const old = previous[document.id];
     const explicit = Date.parse(document.uploadedAt || '');
     const uploadedAt = Number.isFinite(explicit) && explicit <= now ? explicit
-      : old?.uploadedAt || (old && !old.ready && document.ready ? now : fallback == null ? now : fallback * DAY);
+      : old && !old.ready && document.ready ? now : old?.uploadedAt || (fallback == null ? now : fallback * DAY);
     return [document.id,{...old,id:document.id,label:document.label,url:document.url || null,ready:document.ready,
       uploadedAt,watchUntil:Math.max(old?.watchUntil || 0,uploadedAt + DOCUMENT_WINDOW_MS)}];
   }));

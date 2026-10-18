@@ -1,10 +1,11 @@
-import { downloadUrl, documentParts } from './shared/document-names.js';
+import { downloadUrl } from './shared/document-names.js';
 
 export function documentReadiness(root) {
   const counts = new Map();
   return [...root.querySelectorAll('[id^="addfile"]')].flatMap(container => {
     const label = container.querySelector('label')?.textContent.trim().replace(/\s+/g, ' ');
-    if (!label || !documentParts(label)) return [];
+    // Custom requests such as Others need not include a catalogue name/code suffix.
+    if (!label || container.querySelector('[id^="addfile"]')) return [];
     const count = counts.get(label) || 0; counts.set(label, count + 1);
     const url = [...container.querySelectorAll('a[href]')].map(anchor => downloadUrl(anchor.getAttribute('href'))).find(Boolean);
     const date = container.querySelector('time[datetime],[data-uploaded-at],[data-upload-date]');

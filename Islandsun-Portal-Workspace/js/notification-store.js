@@ -13,6 +13,17 @@ export function createNotificationStore(account, { storage = localStorage, locks
   const listeners = new Set();
   const owner = [...crypto.getRandomValues(new Uint32Array(4))].join('-');
   let disposed = false;
+  let lastError = '', lastErrorAt = 0;
+  function reportError(error, operation) {
+    const signature = `${operation}:${error.name}:${error.message}`;
+    if (signature !== lastError || Date.now() - lastErrorAt >= 60000) {
+      lastError = signature; lastErrorAt = Date.now();
+      let characters;
+      try { characters = storage.getItem(key)?.length || 0; } catch { /* Storage permission may be the failure being reported. */ }
+      diagnosticLog('notification-history-failed',{operation,errorType:error.name,message:String(error.message).slice(0,500),characters});
+      onError(error,operation);
+    }
+  }
   function read() {
     const text = storage.getItem(key);
     if (!text) return emptyNotificationState();
@@ -20,7 +31,14 @@ export function createNotificationStore(account, { storage = localStorage, locks
     if (value?.version !== 1 || !value.jobs || !value.notices || !value.muted) throw new Error('Notification history could not be read.');
     return value;
   }
-  function publish() { if (!disposed) for (const listener of listeners) listener(read()); }
+  function publish() {
+    if (disposed) return;
+    const state = read();
+    for (const listener of listeners) {
+      try { listener(state); }
+      catch (error) { reportError(error,'display'); }
+    }
+  }
   function pendingIntents() {
     const entries = [];
     for (let index = 0; index < storage.length; index++) {
@@ -29,7 +47,7 @@ export function createNotificationStore(account, { storage = localStorage, locks
     }
     return entries;
   }
-  async function update(transform) {
+  async function update(transform, operation = 'update') {
     const change = () => {
       if (disposed) return;
       let previous = read();
@@ -57,20 +75,23 @@ export function createNotificationStore(account, { storage = localStorage, locks
       if (locks) return await locks.request(key, change);
       const release = await acquireLocalLock(key);
       try { return change(); } finally { release(); }
-    } catch (error) { onError(error); throw error; }
+    } catch (error) {
+      reportError(error,operation);
+      throw Object.assign(new Error('Local notification history could not be updated.',{cause:error}),{code:'NOTIFICATION_STORAGE'});
+    }
   }
   const changed = event => {
-    if (event.key === key) { try { publish(); } catch (error) { onError(error); } }
+    if (event.key === key) { try { publish(); } catch (error) { reportError(error,'read'); } }
     else if ((event.key?.startsWith(outboxPrefix) || event.key?.startsWith(savePrefix)) && event.newValue) update(state => state).catch(() => {});
   };
   window.addEventListener('storage', changed);
   try {
     const saved = read(), count = Object.keys(saved.notices).length;
     if (Object.keys(pruneNotificationState(saved).notices).length !== count) void update(state => state).catch(() => {});
-  } catch (error) { onError(error); }
+  } catch (error) { reportError(error,'read'); }
   return {
     key, read, account,
-    saveMonitor: monitor => update(state => ({...state,monitor})),
+    saveMonitor: monitor => update(state => ({...state,monitor}), 'save-schedule'),
     registerSave(record) {
       if (disposed || !['sample','tir'].includes(record.kind)) return;
       if (pendingIntents().length >= 64) throw new Error('Save tracking is busy.');

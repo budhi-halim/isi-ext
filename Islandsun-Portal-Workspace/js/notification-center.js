@@ -14,7 +14,7 @@ function destination(item) {
 }
 
 function orderedNotices(state) {
-  return Object.values(state.notices).sort((a, b) => Number(b.type === 'update') - Number(a.type === 'update') || a.created - b.created || a.id.localeCompare(b.id));
+  return Object.values(state.notices).sort((a, b) => Number(b.type === 'update') - Number(a.type === 'update') || b.created - a.created || b.id.localeCompare(a.id));
 }
 
 export function createNotificationCenter(store, notices) {
@@ -34,7 +34,7 @@ export function createNotificationCenter(store, notices) {
   const updateBadge = document.createElement('span'); updateBadge.className = 'isi-notification-count isi-notification-count--update'; button.append(updateBadge);
   badge.setAttribute('aria-hidden', 'true'); updateBadge.setAttribute('aria-hidden', 'true');
   target.insertBefore(button, document.querySelector('#isi-portal-theme'));
-  const reportError = () => notices.notify('Notification history could not be saved. Please try again.', { error: true });
+  const reportError = () => notices.notify('Notifications could not be updated in this browser. Please try again; your portal requests are unaffected.', { key:'notification-history-error', error: true });
   function dismiss(id) { store.dismiss(id).catch(reportError); }
   function closeTray(focusBell = true) { if (dialog) { restoreFocus = focusBell; const current = dialog; exitSurface(current, () => current.close()); } }
   function closeConfirmation() { if (confirmation) { const current = confirmation; exitSurface(current, () => current.close()); } }
@@ -136,7 +136,10 @@ export function createNotificationCenter(store, notices) {
       const mark = icon(row.dataset.tone === 'warning' ? 'clock' : 'check'); mark.classList.add('isi-notice-mark');
       const href = destination(item);
       const content = document.createElement(href ? 'a' : 'div'), text = document.createElement('p'), time = document.createElement('time');
-      if (href) { content.href = href; content.className = 'isi-notification-link'; }
+      if (href) {
+        content.href = href; content.className = 'isi-notification-link';
+        if (item.type === 'update') { content.target = '_blank'; content.rel = 'noopener'; }
+      }
       if (item.customer) { const customer = document.createElement('strong'); customer.className = 'isi-notification-customer'; customer.textContent = item.customer; content.append(customer); }
       text.textContent = item.message; time.dateTime = new Date(item.created).toISOString(); time.textContent = new Date(item.created).toLocaleString();
       content.append(text, time);
@@ -176,10 +179,10 @@ export function createNotificationCenter(store, notices) {
       if (item.delivered || scheduled.has(item.id)) continue;
       scheduled.add(item.id);
       const accepted = notices.notify(item.message, {
-        href:destination(item), customer:item.customer,
+        href:destination(item), newTab:item.type === 'update', customer:item.customer,
         key: item.id, tone: notificationTone(item.type), onDismiss: () => dismiss(item.id), onMute: item.muteKey ? () => mute(item) : undefined,
         beforeShow: () => store.claim(item.id), isCurrent: () => Boolean(store.read().notices[item.id]),
-        onSkip: () => { scheduled.delete(item.id); store.release(item.id).catch(reportError); },
+        onSkip: () => { scheduled.delete(item.id); return store.release(item.id).catch(reportError); },
         onShow: () => { shown.add(item.id); store.delivered(item.id).catch(reportError); },
       });
       if (accepted === false) scheduled.delete(item.id);

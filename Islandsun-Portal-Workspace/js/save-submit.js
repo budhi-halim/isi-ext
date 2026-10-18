@@ -2,8 +2,9 @@ import { pageSubmissionRecord } from './submission-tracking.js';
 import { submissionIntent } from './submission-logic.js';
 import { saveContract } from './save-submit-logic.js';
 import { labelSaveAction } from './icons.js';
-import { sampleRequestNumber, sampleProductSnapshot } from './sample-save-snapshot.js';
+import { sampleRequestNumber, sampleProductSnapshot, sampleReviewMatches } from './sample-save-snapshot.js';
 import { createSaveSubmitFrame } from './save-submit-frame.js';
+import { diagnosticLog } from './diagnostic-log.js';
 
 /** Add the explicit two-stage action while leaving ordinary native Save intact. */
 export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSaved }) {
@@ -21,11 +22,21 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
       if (button.disabled !== disabled) button.disabled = disabled;
     }
   }
-  const observer = new MutationObserver(syncButtons);
-  observer.observe(document.body, {subtree:true, attributes:true, attributeFilter:['style','class','hidden','disabled','data-isi-read-only']});
+  function continueProductReview() {
+    if (!active?.authorized || active.reviewed || active.transaction.committed) return;
+    const review = document.querySelector('#modal-produk-masuk');
+    if (!review?.getClientRects().length || getComputedStyle(review).display === 'none') return;
+    const save = [...review.querySelectorAll('button[onclick],input[onclick]')].filter(button => /^(save|simpan)$/i.test((button.textContent || button.value).trim()));
+    if (save.length !== 1 || save[0].disabled || !sampleReviewMatches(active.products,review)) return;
+    active.reviewed = true;
+    diagnosticLog('submission-product-review',{number:active.number,matched:true,products:active.products.length});
+    save[0].click();
+  }
+  const observer = new MutationObserver(() => { syncButtons(); continueProductReview(); });
+  observer.observe(document.body, {subtree:true, childList:true, characterData:true, attributes:true, attributeFilter:['style','class','hidden','disabled','data-isi-read-only']});
   function cancelPrepared() {
     if (!active || active.transaction.committed) return;
-    active.transaction.destroy(); delete active.form.dataset.isiSaveSubmit; active = null;
+    active.transaction.destroy(); delete active.form.dataset.isiSaveSubmit; delete active.form.dataset.isiSaveSubmitAuthorized; active = null;
     clearTimeout(timer); syncButtons();
   }
   function commit(form) {
@@ -38,7 +49,11 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
   document.addEventListener('islandsun-native-submit', event => commit(event.target), {signal:events.signal});
   document.addEventListener('islandsun-native-submit-failed', () => active?.transaction.stop('The save could not be confirmed. Check the request list before trying again.'), {signal:events.signal});
   document.addEventListener('invalid', event => { if (event.target.form === active?.form) cancelPrepared(); }, {capture:true,signal:events.signal});
-  document.addEventListener('islandsun-confirm-response', event => { if (event.detail?.accepted !== true) cancelPrepared(); }, {signal:events.signal});
+  document.addEventListener('islandsun-confirm-response', event => {
+    if (!active || !event.detail?.combined || event.detail.action !== 'Save') return;
+    if (event.detail.accepted !== true) cancelPrepared();
+    else { active.authorized = true; active.form.dataset.isiSaveSubmitAuthorized = 'true'; active.transaction.waitForSave(); }
+  }, {capture:true,signal:events.signal});
   document.addEventListener('islandsun-portal-notice', cancelPrepared, {signal:events.signal});
   document.addEventListener('click', event => {
     if (!event.isTrusted || !active) return;
@@ -63,9 +78,9 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
         // Leave native successful controls enabled until the browser has collected the form data.
         setTimeout(() => { if (!disposed && save.isConnected && locked.has(form)) save.disabled = true; }, 0);
       },
-      onFinished() { delete form.dataset.isiSaveSubmit; syncButtons(); },
+      onFinished() { delete form.dataset.isiSaveSubmit; delete form.dataset.isiSaveSubmitAuthorized; syncButtons(); },
     });
-    active = {form, transaction}; form.dataset.isiSaveSubmit = 'iframe'; syncButtons();
+    active = {form, transaction, products, number, authorized:false, reviewed:false}; form.dataset.isiSaveSubmit = 'iframe'; syncButtons();
     try { await transaction.prepare(); }
     catch {
       if (disposed || active?.transaction !== transaction) return;
@@ -76,7 +91,11 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
     try { save.click(); }
     catch { cancelPrepared(); notify('Save did not start. Review the form before trying again.', {error:true}); }
     if (active && !transaction.committed) timer = setTimeout(() => {
-      if (active && !transaction.committed) { cancelPrepared(); notify('Save did not start. Review the form before trying again.', {error:true}); }
+      if (active && !transaction.committed) {
+        const review = active.authorized && document.querySelector('#modal-produk-masuk');
+        diagnosticLog('submission-save-not-started',{number,authorized:active.authorized,reviewed:active.reviewed,reviewPresent:!!review});
+        cancelPrepared(); notify(review ? 'The portal’s product review could not be verified. Nothing was saved or submitted.' : 'Save did not start. Review the form before trying again.', {error:true});
+      }
     }, 60000);
   }
   function restoreGroup(save) {
@@ -111,7 +130,7 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
     if (disposed) return;
     disposed = true; clearTimeout(timer); events.abort(); observer.disconnect();
     active?.transaction.destroy();
-    if (active) delete active.form.dataset.isiSaveSubmit;
+    if (active) { delete active.form.dataset.isiSaveSubmit; delete active.form.dataset.isiSaveSubmitAuthorized; }
     for (const [save, button] of buttons) { button.remove(); restoreGroup(save); }
     buttons.clear();
   }};

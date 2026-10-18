@@ -17,6 +17,7 @@ const PAUSE_REASONS = Object.freeze({
   'unlock-required': 'automatic saving is preparing after the extension update; opening the offline copy is not required',
   disabled: 'saving is disabled in settings',
   retry: 'a check failed; it will retry automatically',
+  'notification-storage': 'local reminder history could not be saved; retrying storage before fetching more records',
   idle: 'watched details are cached or not yet due for another check',
 });
 

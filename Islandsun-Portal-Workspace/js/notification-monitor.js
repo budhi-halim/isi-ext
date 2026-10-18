@@ -19,10 +19,22 @@ export function createNotificationMonitor(store, repository, notices, accountNam
   let disposed = false, busy = false, timer, controller, releaseLeadership;
   let retry = 15000;
   let previewCacheChecked = false;
+  let pendingObservation;
   let memory = store.read().monitor || {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
   const schedule = delay => { clearTimeout(timer); if (!disposed) timer = setTimeout(tick,delay); };
   async function checkpoint() {
     if (!disposed) await store.saveMonitor?.(memory);
+  }
+  async function retainPending(signal) {
+    if (!pendingObservation) return;
+    const pending = pendingObservation;
+    signal.throwIfAborted();
+    await store.observe(pending.result);
+    signal.throwIfAborted();
+    if (pendingObservation !== pending) return;
+    memory.checked[pending.key] = pending.checked;
+    await checkpoint();
+    if (pendingObservation === pending) pendingObservation = null;
   }
   function warmupQueue() {
     const pageSize = Math.max(5,Math.min(100,Number(document.querySelector?.('[name="mytable_length"]')?.value) || memory.pageSize || 10));
@@ -55,10 +67,9 @@ export function createNotificationMonitor(store, repository, notices, accountNam
     const changed = previous && previous.signature !== signature;
     async function retain(result, verifiedDocuments) {
       signal.throwIfAborted();
-      await store.observe(result);
-      memory.checked[key] = {...memory.checked[key],signature,at:Date.now(),snapshot:result,retryAt:0,
-        ...(record.kind === 'tir' ? {documents:verifiedDocuments ? Object.fromEntries(result.documents.map(item=>[item.id,item])) : documentBaseline(result,previous?.documents)} : {})};
-      await checkpoint();
+      pendingObservation = {key,result,checked:{...memory.checked[key],signature,at:Date.now(),snapshot:result,retryAt:0,failures:0,
+        ...(record.kind === 'tir' ? {documents:verifiedDocuments ? Object.fromEntries(result.documents.map(item=>[item.id,item])) : documentBaseline(result,previous?.documents)} : {})}};
+      await retainPending(signal);
     }
     try {
       let result = await readRecord(record,repository,signal,{purpose,reason,fresh:!!changed});
@@ -67,10 +78,12 @@ export function createNotificationMonitor(store, repository, notices, accountNam
       diagnosticLog('monitor-observed',{kind:record.kind,number:record.number,purpose,statusChanged:!!changed,documents});
       return true;
     } catch (error) {
-      if (signal.aborted || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
-      memory.checked[key] = {...memory.checked[key],retryAt:Date.now()+60000};
-      diagnosticLog('monitor-retry',{kind:record.kind,number:record.number,purpose,reason,retryAt:memory.checked[key].retryAt,errorType:error.name,code:error.code});
-      activity.note(`record-retry:${key}`,`${record.number || record.kind}: ${purpose === 'warmup' ? 'hover warm-up' : 'notification check'} failed; retry in 60s. Other eligible records can continue.`);
+      if (signal.aborted || error.code === 'NOTIFICATION_STORAGE' || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
+      const failures = (memory.checked[key]?.failures || 0) + 1;
+      const delay = Math.min(2*3600000,60000*2**Math.min(failures-1,7));
+      memory.checked[key] = {...memory.checked[key],failures,retrySignature:signature,retryAt:Date.now()+delay};
+      diagnosticLog('monitor-retry',{kind:record.kind,number:record.number,purpose,reason,retryAt:memory.checked[key].retryAt,failures,errorType:error.name,code:error.code,message:String(error.message).slice(0,500)});
+      activity.note(`record-retry:${key}`,`${record.number || record.kind}: ${purpose === 'warmup' ? 'hover warm-up' : 'notification check'} failed; retry at ${activityTime(memory.checked[key].retryAt)}. Other eligible records can continue.`);
       await checkpoint(); return false;
     }
   }
@@ -87,6 +100,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         if (release) { memory = store.read().monitor || memory; previewCacheChecked = false; }
       }
       if (!releaseLeadership) { activity.pause('other-tab'); schedule(5000); return; }
+      await retainPending(signal);
       await store.advanceReminders?.();
       if (!memory.indexedAt || Date.now()-memory.indexedAt >= INDEX_FRESH_MS) {
         const observedAt = Date.now();
@@ -94,6 +108,10 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         signal.throwIfAborted();
         await store.observeStatuses(index,{observedAt});
         memory.records = index; memory.indexedAt = Date.now();
+        for (const record of index) {
+          const previous = memory.checked[`${record.kind}:${record.id}`];
+          if (previous?.retrySignature && previous.retrySignature !== statusSignature(record)) { previous.retryAt = 0; previous.failures = 0; }
+        }
         const present = new Set(index.map(record=>`${record.kind}:${record.id}`));
         for (const key of Object.keys(memory.checked)) if (!present.has(key)) delete memory.checked[key];
         // Weekly reminders advance from the verified snapshot without another detail request.
@@ -163,14 +181,14 @@ export function createNotificationMonitor(store, repository, notices, accountNam
       if (!signal.aborted && !disposed) {
         if (error.message === 'session' || /session has expired/i.test(error.message)) {
           notices.notify('Sign in again to resume notifications.',{key:'notification-session',error:true}); activity.pause('signed-out',Date.now()+60000); schedule(60000);
-        } else { activity.pause('retry',Date.now()+retry); diagnosticLog('monitor-paused',{errorType:error.name,code:error.code,retryAt:Date.now()+retry}); schedule(retry); retry = Math.min(retry*2,120000); }
+        } else { activity.pause(error.code === 'NOTIFICATION_STORAGE' ? 'notification-storage' : 'retry',Date.now()+retry); diagnosticLog('monitor-paused',{errorType:error.name,code:error.code,message:String(error.message).slice(0,500),localRetry:!!pendingObservation,retryAt:Date.now()+retry}); schedule(retry); retry = Math.min(retry*2,120000); }
       }
     } finally { busy = false; controller = null; if (signal.aborted && !disposed) schedule(1000); }
   }
   const reset = (changes,area) => {
     const value = changes['islandsun.archive-reset']?.newValue;
     if (area !== 'local' || !value || value.account && value.account !== store.account) return;
-    controller?.abort(); previewCacheChecked = false; memory = {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
+    controller?.abort(); pendingObservation = null; previewCacheChecked = false; memory = {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
     repository.clear?.(); checkpoint().catch(()=>{}); schedule(1000);
   };
   globalThis.chrome?.storage?.onChanged?.addListener(reset);

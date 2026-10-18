@@ -89,7 +89,11 @@ async function start() {
   const accountChanged = (changes,area) => { if (area === 'local' && changes[ACCOUNT_SCOPE]) checkAccount(changes[ACCOUNT_SCOPE].newValue); };
   if (account && document.querySelector('.content-wrapper')) {
     chrome.runtime.sendMessage({type:'portal-session-active'}).catch(()=>{});
-    store = createNotificationStore(account, { onError: () => notices.notify('Notification history is unavailable. Your records have not changed.', { error: true }) });
+    store = createNotificationStore(account, { onError: (error,operation) => notices.notify(operation === 'display'
+      ? 'Notifications could not be displayed. Reopen the notification tray or reload the page. Your portal requests are unaffected.'
+      : error.name === 'QuotaExceededError'
+      ? 'This browser’s notification storage is full. Reminder history could not be saved. Your portal requests are unaffected.'
+      : 'Reminder history could not be updated in this browser. The extension will retry; your portal requests are unaffected.', { key:'notification-history-error', error: true }) });
     submissions = createSubmissionTracking(store, () => notices.notify('This submission could not be tracked for notifications. Check its status in the request list.', { error: true }));
     saves = createSavedRequestTracking(store, () => notices.notify('The reminder for this save could not be recorded. Check its status in the request list.', {error:true}));
     combinedStore = withUpdateNotifications(store);

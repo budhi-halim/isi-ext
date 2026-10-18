@@ -11,7 +11,9 @@ initializeUpdatePopup('workspace', {discoverFamily:true});
 initializeTheme();
 const $ = selector => document.querySelector(selector);
 let account = '', revision = 0;
-initializeArchiveSettings(() => account);
+const pendingSettings = new Set();
+const accountControls = [['#keep-session-active','keepSessionAlive'],['#offline-enabled','offlineArchive'],['#offline-documents','offlineDocuments']];
+const archiveSettings = initializeArchiveSettings(() => account);
 
 async function render() {
   const current = ++revision;
@@ -25,9 +27,12 @@ async function render() {
     document.body.dataset.signedIn = String(Boolean(account));
     $('#settings-account').textContent = account ? 'Settings for ' + settings.name : '';
     $('#enabled').checked = settings.enabled;
-    $('#keep-session-active').checked = settings.keepSessionAlive;
-    $('#offline-enabled').checked = settings.offlineArchive;
-    $('#offline-documents').checked = settings.offlineDocuments;
+    for (const [selector,key] of accountControls) {
+      const control = $(selector);
+      if (!pendingSettings.has(key)) control.checked = settings[key];
+      control.disabled = !account || pendingSettings.has(key);
+    }
+    archiveSettings.sync();
     $('#state-title').textContent = settings.enabled ? 'Always ready' : 'Paused';
     if (!account) {
       $('#advanced-settings').open = false;
@@ -52,12 +57,12 @@ $('#enabled').addEventListener('change', async event => {
   catch { $('#message').textContent = 'The setting could not be saved.'; }
   finally { control.disabled = false; await render(); }
 });
-for (const [selector,key] of [['#keep-session-active','keepSessionAlive'],['#offline-enabled','offlineArchive']]) {
+for (const [selector,key] of accountControls) {
   $(selector).addEventListener('change',async event => {
-    const control = event.currentTarget, owner = account; control.disabled = true;
+    const control = event.currentTarget, owner = account; control.disabled = true; pendingSettings.add(key);
     try { await requestAccountSettings(owner,{[key]:control.checked}); }
     catch (error) { $('#message').textContent = error.message; }
-    finally { control.disabled = false; await render(); }
+    finally { pendingSettings.delete(key); await render(); }
   });
 }
 if (globalThis.chrome?.storage) chrome.storage.onChanged.addListener((changes,area) => {

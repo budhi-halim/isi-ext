@@ -340,6 +340,7 @@ export function startOfflineService(gate, diagnostics, debug) {
         pendingRecord = record.key;
         pendingNumber = record.number;
         pendingFingerprint = record.fingerprint;
+        trace = {kind:`archive-${record.kind}-detail`,recordKey:record.key,purpose:'archive'};
         await wait(300,signal);
         const resumeFiles = record.detailCapture?.fingerprint === record.fingerprint
           && record.detailCapture.at === record.detailAt && record.detail;
@@ -393,7 +394,7 @@ export function startOfflineService(gate, diagnostics, debug) {
           await archiveMeta(rotationKey,{kind:afterKind,attemptedAt:Date.now()});
           await note('documents-resumed',{recordId:record.id,detailAt:record.detailAt});
         }
-        await note('detail-saved',{recordId:record.id,number:record.number,documents:detail.documents.length});
+        if (!resumeFiles) await note('detail-saved',{recordId:record.id,number:record.number,documents:detail.documents.length});
         const files = await recordFiles(record.key,{decrypt:false});
         for (const file of files) {
           signal.throwIfAborted();

@@ -14,7 +14,7 @@ export function createPortalDialogs() {
   let current = null, disposed = false;
   function respond(item, accepted) {
     item.respond?.(accepted);
-    if (item.id !== undefined) document.dispatchEvent(new CustomEvent('islandsun-confirm-response', { detail: { id: item.id, accepted } }));
+    if (item.id !== undefined) document.dispatchEvent(new CustomEvent('islandsun-confirm-response', { detail: { id: item.id, accepted, action:item.action, combined:item.combined } }));
   }
   function showNext() {
     if (disposed || current || !queue.length) return;
@@ -27,8 +27,8 @@ export function createPortalDialogs() {
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = item.id === undefined && (!item.respond || !item.action) ? 'Close' : 'Cancel';
     actions.append(cancel);
     if (item.id !== undefined || item.respond && item.action) {
-      const accept = document.createElement('button'); accept.type = 'button'; accept.textContent = item.action; accept.className = 'btn btn-primary';
-      if (item.action === 'Save') { accept.dataset.isiSaveAction = ''; labelSaveAction(accept,item.action); }
+      const accept = document.createElement('button'); accept.type = 'button'; accept.textContent = item.combined ? 'Save & Submit' : item.action; accept.className = 'btn btn-primary';
+      if (item.action === 'Save') { accept.dataset.isiSaveAction = ''; labelSaveAction(accept,accept.textContent); }
       accept.addEventListener('click', () => finish(true)); actions.append(accept);
     }
     dialog.append(title,message,actions); document.body.append(dialog);
@@ -57,13 +57,16 @@ export function createPortalDialogs() {
   document.addEventListener('islandsun-confirm-request', event => {
     if (!Number.isSafeInteger(event.detail?.id) || typeof event.detail.message !== 'string') return;
     const action = ['Save','Delete','Edit','Continue'].includes(event.detail.action) ? event.detail.action : 'Continue';
-    const item = { id: event.detail.id, action, message: confirmationText(event.detail.message, action) };
-    const combined = action === 'Save' && document.querySelector('form[data-isi-save-submit]');
+    const item = { id: event.detail.id, action, combined:event.detail.combined === true, message: confirmationText(event.detail.message, action) };
+    const combined = action === 'Save' && item.combined && document.querySelector('form[data-isi-save-submit]');
     if (combined) {
+      if (event.detail.authorized === true) {
+        // Replaying the same button inside its click handler is suppressed by the browser.
+        queueMicrotask(() => respond(item,!disposed && combined.dataset.isiSaveSubmitAuthorized === 'true'));
+        return;
+      }
       item.title = 'Save & Submit';
-      item.message = combined.dataset.isiSaveSubmit === 'select'
-        ? 'Save this TIR, then open the saved request to review it and finish submission to Product Marketing?'
-        : 'Save this request and submit the verified saved record to Product Marketing?';
+      item.message = 'Save this request and submit the verified saved record to Product Marketing?';
     }
     if (current || queue.length) { respond(item,false); return; }
     queue.push(item); showNext();

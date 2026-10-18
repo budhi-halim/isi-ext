@@ -4,7 +4,7 @@ import { portalPath, saveContract, sameSavedFields, sameSavedRecord, newTirRecor
 import { readSaveIndex, verifySaveAccount } from './save-index.js';
 import { savedPageAccount, saveNeedsSignIn } from './save-response.js';
 import { saveFieldSnapshot } from './save-field-snapshot.js';
-import { sampleProductSnapshot } from './sample-save-snapshot.js';
+import { sampleProductSnapshot, sameSampleProducts } from './sample-save-snapshot.js';
 import { createRequestProgress } from './request-progress.js';
 import { holdForegroundAction } from './foreground-action.js';
 import { diagnosticLog } from './diagnostic-log.js';
@@ -41,7 +41,7 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     inspect();
     if (!disposed && state !== 'finished') pollTimer = setTimeout(poll,250);
   }
-  let committed = false, selected = false, submitted = false, awaitingDocument;
+  let committed = false, submitted = false, awaitingDocument;
   function restoreTarget() {
     if (originalTarget === null) form.removeAttribute('target'); else form.setAttribute('target', originalTarget);
     for (const [node, value] of overrides) if (node.isConnected) node.setAttribute('formtarget', value);
@@ -153,32 +153,16 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     if (attempt < 2) recoveryTimer = setTimeout(() => recover(attempt+1), SAVE_RETRY_DELAYS_MS[attempt]);
     else finish('The portal has not confirmed the saved result. Check the request list before trying again; saving was not repeated.');
   }
-  function openTir(record, doc, manual = false) {
+  function openTir(record, doc) {
     if (disposed || state === 'finished') return;
-    selected = manual; pending.id = record.id; pending.number = record.number;
+    pending.id = record.id; pending.number = record.number;
     progress.hidden = false; choices.replaceChildren(); actions.replaceChildren();
-    trace('submission-located', {url:tirDetailUrl(record.id), source:manual ? 'user-selection' : 'new-index-record'});
+    trace('submission-located', {url:tirDetailUrl(record.id), source:'new-index-record'});
     openRecoveryPage(tirDetailUrl(record.id));
   }
   function chooseTir(records, doc) {
-    state = 'selecting'; progress.hidden = true;
-    message.textContent = 'More than one TIR was created while saving. Select your request; its saved fields will be checked before submission.';
-    const items = [];
-    for (const record of records) {
-      const button = document.createElement('button'); button.type = 'button';
-      button.textContent = `${record.number} · ${record.customer}`;
-      button.addEventListener('click', () => {
-        if (state !== 'selecting') return;
-        openTir(record, doc, true);
-      });
-      items.push(button);
-    }
-    choices.replaceChildren(...items);
-    if (items.length) clearTimeout(timer);
-    if (!actions.children.length) {
-      const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Review in the TIR list';
-      open.addEventListener('click', () => navigate(new URL('/islandsun/master/Tir', location.origin).href)); actions.append(open);
-    }
+    trace('submission-identity-ambiguous',{candidates:records.map(record => ({id:record.id,number:record.number}))});
+    finish('The portal returned more than one possible saved TIR. Automatic submission stopped because its identity could not be confirmed. Check the TIR list; Save was not repeated.');
   }
   async function locateTir(doc, attempt = 0) {
     if (disposed || state === 'finished') return;
@@ -277,10 +261,11 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     const actual = savedForm && saveFieldSnapshot(savedForm, pending.kind);
     const products = savedForm && pending.products && sampleProductSnapshot(savedForm);
     if (!savedForm || !active && !link || !sameSavedFields(pending.fields, actual)
-      || pending.products && JSON.stringify(pending.products) !== JSON.stringify(products)) {
+      || pending.products && !sameSampleProducts(pending.products,products)) {
       message.textContent = 'Checking the saved fields and products…';
       verificationIssue = 'saved-fields-not-matched';
-      const details = {hasForm:!!savedForm,hasSubmit:!!link,fields:Object.keys(pending.fields).filter(key => JSON.stringify(pending.fields[key]) !== JSON.stringify(actual?.[key])),productsMatch:!pending.products || JSON.stringify(pending.products) === JSON.stringify(products)};
+      const details = {hasForm:!!savedForm,hasSubmit:!!link,fields:Object.keys(pending.fields).filter(key => JSON.stringify(pending.fields[key]) !== JSON.stringify(actual?.[key])),productsMatch:!pending.products || sameSampleProducts(pending.products,products),
+        expectedProducts:pending.products,actualProducts:products,productHeadings:[...savedForm?.querySelectorAll('#tableSP thead th') || []].map(cell=>cell.textContent.trim())};
       const signature = JSON.stringify(details);
       if (signature !== waitSignature) { waitSignature = signature; trace('submission-verification-pending',{...details,attempt:verificationAttempt}); }
       // Native Ajax may still be populating the returned form; observe it within the same deadline.
@@ -308,19 +293,18 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
       frame.src = link.href;
       scheduleRecovery();
     };
-    if (selected) {
-      clearTimeout(timer);
-      state = 'review'; progress.hidden = true; actions.replaceChildren();
-      message.textContent = `${record.number} matches the saved fields. Submit this TIR to Product Marketing?`;
-      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-primary'; button.textContent = 'Submit';
-      button.addEventListener('click', submit); actions.append(button); observer?.disconnect();
-    } else submit();
+    void submit();
   }
   frame.addEventListener('load', inspect);
   dialog.addEventListener('cancel', event => event.preventDefault());
   document.body.append(frame, dialog); form.target = name;
   for (const [node] of overrides) node.setAttribute('formtarget', name);
   return {
+    waitForSave() {
+      if (disposed || committed) return;
+      message.textContent = 'Checking the portal’s product review and saving the request…';
+      if (!dialog.open) dialog.showModal();
+    },
     async prepare() {
       if (pending.id) return;
       state = 'preparing'; message.textContent = 'Preparing to save and identify this request…';

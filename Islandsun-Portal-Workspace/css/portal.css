@@ -580,4 +580,5 @@ html[data-isi-portal="enabled"][data-isi-layout="table"] { height: 100%; overflo
 
 [data-isi-portal="enabled"] .isi-textarea-count { display: block; margin-block: 4px 12px; color: var(--isi-muted); font-size: .8rem; text-align: end; font-variant-numeric: tabular-nums; }
 [data-isi-portal="enabled"] .isi-textarea-count[data-over-limit="true"] { color: var(--isi-error); font-weight: 600; }
-[data-isi-portal="enabled"] #modalProduk [data-isi-marketing-price] { margin-block-start: 18px; }
+[data-isi-portal="enabled"] #modalProduk .modal-body > .form-inline { display: flow-root; }
+[data-isi-portal="enabled"] #modalProduk [data-isi-marketing-price] { clear: both; margin-block-start: 0; padding-block-start: 18px; }

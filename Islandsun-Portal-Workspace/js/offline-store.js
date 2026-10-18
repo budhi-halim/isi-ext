@@ -399,23 +399,27 @@ export async function archiveUsage(account = null) {
   const transaction = database.transaction(['records','files','blobs']);
   const result = {records:0,files:0,bytes:0};
   const hashes = new Set();
-  await Promise.all(['records','files'].map(name => new Promise((resolve,reject) => {
-    const cursor = transaction.objectStore(name).openCursor();
+  const records = transaction.objectStore('records');
+  const count = request(account === null ? records.count()
+    : records.index('accountKind').count(IDBKeyRange.bound([account,''],[account,'\uffff'])));
+  await Promise.all([count.then(value => { result.records = value; }), new Promise((resolve,reject) => {
+    const cursor = transaction.objectStore('files').openCursor();
     cursor.onerror = () => reject(cursor.error);
     cursor.onsuccess = () => {
       const item = cursor.result;
       if (!item) { resolve(); return; }
       if (account === null || item.value.account === account) {
-        if (name !== 'files' || item.value.purpose !== 'source') result[name]++;
-        if (name === 'files') {
-          if (item.value.hash) hashes.add(item.value.hash);
-          else result.bytes += item.value.blob?.size || 0;
-        }
+        if (item.value.purpose !== 'source') result.files++;
+        if (item.value.hash) hashes.add(item.value.hash);
+        else result.bytes += item.value.blob?.size || 0;
       }
       item.continue();
     };
-  })));
-  for (const hash of hashes) { const blob = await request(transaction.objectStore('blobs').get(hash)); result.bytes += blob?.size || blob?.blob?.size || 0; }
+  })]);
+  await Promise.all([...hashes].map(async hash => {
+    const blob = await request(transaction.objectStore('blobs').get(hash));
+    result.bytes += blob?.size || blob?.blob?.size || 0;
+  }));
   return result;
 }
 
