@@ -11,15 +11,21 @@ const result = request => new Promise((resolve, reject) => {
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => reject(request.error);
 });
-const completed = transaction => new Promise((resolve, reject) => {
-  transaction.oncomplete = resolve;
-  transaction.onabort = () => reject(transaction.error || new Error('Diagnostic storage transaction stopped.'));
-  transaction.onerror = () => {};
-});
+const completed = transaction => {
+  const promise = new Promise((resolve, reject) => {
+    transaction.oncomplete = resolve;
+    transaction.onabort = () => reject(transaction.error || new Error('Diagnostic storage transaction stopped.'));
+    transaction.onerror = () => {};
+  });
+  // A request can fail before its caller reaches the transaction-completion await.
+  promise.catch(() => {});
+  return promise;
+};
 
 async function database() {
   if (!opening) opening = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 2);
+    let blocked = false;
+    const request = indexedDB.open(DATABASE, 3);
     request.onupgradeneeded = event => {
       if (event.oldVersion < 1) {
         const events = request.result.createObjectStore('events', { keyPath: 'sequence', autoIncrement: true });
@@ -34,13 +40,18 @@ async function database() {
         const incidents = request.result.createObjectStore('incidents', {keyPath:'sequence',autoIncrement:true});
         incidents.createIndex('at','at'); incidents.createIndex('account','account');
       }
+      if (event.oldVersion < 3) {
+        for (const name of ['events','bodies','incidents']) request.transaction.objectStore(name).createIndex('size','size');
+      }
     };
     request.onsuccess = () => {
       const value = request.result;
+      if (blocked) { value.close(); return; }
       value.onversionchange = () => { value.close(); opening = null; };
       resolve(value);
     };
     request.onerror = () => { opening = null; reject(request.error); };
+    request.onblocked = () => { blocked = true; opening = null; reject(new Error('Close older offline tabs and reopen the extension.')); };
   });
   return opening;
 }
@@ -54,7 +65,7 @@ function serialize(task) {
 function importantEvent(entry) {
   return entry.failure === true || entry.status >= 400 || typeof entry.errorType === 'string'
     || /timeout|http-error|data-error/.test(entry.outcome || '')
-    || /failed|error|retry|^submission-|^notification-(?:created|removed)|^draft-save|^archive-settings/.test(entry.event)
+    || /failed|error|retry|^submission-|^notification-(?:created|removed|action-saved)|^draft-save|^archive-settings/.test(entry.event)
     || entry.event === 'navigation-state' && entry.durationMs >= 4000;
 }
 
@@ -141,21 +152,28 @@ async function trim(db) {
   await done;
 }
 
-export function clearJournal(account = null) {
+export function clearJournal(account = null, {onProgress = () => {}} = {}) {
   if (account === null) generation++;
   else accountGenerations.set(account,(accountGenerations.get(account) || 0) + 1);
   return serialize(async () => {
     const db = await database(), transaction = db.transaction(['events', 'bodies', 'incidents', 'meta'], 'readwrite'), done = completed(transaction);
-    for (const name of ['events', 'bodies', 'incidents']) {
+    const names = ['events','bodies','incidents'];
+    const keys = account === null ? null : await Promise.all(names.map(name => result(transaction.objectStore(name).index('account').getAllKeys(account))));
+    const counts = keys ? keys.map(items => items.length) : await Promise.all(names.map(name => result(transaction.objectStore(name).count())));
+    const total = counts.reduce((sum,count) => sum + count,0);
+    let removed = 0;
+    onProgress({phase:'history',completed:removed,total});
+    for (const [index,name] of names.entries()) {
       const store = transaction.objectStore(name);
-      if (account === null) store.clear();
-      else {
-        const request = store.index('account').openCursor(IDBKeyRange.only(account));
-        request.onsuccess = () => { const cursor = request.result; if (cursor) { cursor.delete(); cursor.continue(); } };
-      }
+      const removals = account === null ? [store.clear()] : keys[index].map(key => store.delete(key));
+      for (const removal of removals) removal.onsuccess = () => {
+        removed += account === null ? counts[index] : 1;
+        onProgress({phase:'history',completed:removed,total});
+      };
     }
     transaction.objectStore('meta').delete('usage');
     await done;
+    onProgress({phase:'recount',completed:0,total:0});
     await recount(db);
   });
 }
@@ -165,9 +183,20 @@ async function recount(db) {
   const usage = { events: 0, incidents:0, bytes: 0, discardedEvents: 0, discardedBodies: 0, discardedIncidents:0 };
   for (const name of ['events', 'bodies', 'incidents']) {
     await new Promise((resolve, reject) => {
-      const request = transaction.objectStore(name).openCursor();
+      const index = transaction.objectStore(name).index('size');
+      const request = index.openKeyCursor(null,'nextunique');
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => { const cursor = request.result; if (!cursor) return resolve(); usage.bytes += cursor.value.size; if (name !== 'bodies') usage[name]++; cursor.continue(); };
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { resolve(); return; }
+        const count = index.count(cursor.key);
+        count.onerror = () => reject(count.error);
+        count.onsuccess = () => {
+          usage.bytes += cursor.key * count.result;
+          if (name !== 'bodies') usage[name] += count.result;
+          cursor.continue();
+        };
+      };
     });
   }
   transaction.objectStore('meta').put(usage, 'usage');

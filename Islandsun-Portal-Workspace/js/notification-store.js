@@ -1,4 +1,4 @@
-import { emptyNotificationState, observeRecord, dismissNotification, acknowledgeNotices } from './notification-logic.js';
+import { emptyNotificationState, observeRecord, dismissNotification, acknowledgeNotices, silenceNotifications } from './notification-logic.js';
 import { acquireLocalLock } from './local-lock.js';
 import { registerSubmission, observeSubmissionStatuses, submissionRecord, SUBMISSION_INTENT_LIFETIME } from './submission-logic.js';
 import { pruneNotificationState } from './notification-relevance.js';
@@ -14,13 +14,13 @@ export function createNotificationStore(account, { storage = localStorage, locks
   const owner = [...crypto.getRandomValues(new Uint32Array(4))].join('-');
   let disposed = false;
   let lastError = '', lastErrorAt = 0;
-  function reportError(error, operation) {
-    const signature = `${operation}:${error.name}:${error.message}`;
+  function reportError(error, operation, stage = operation) {
+    const signature = `${operation}:${stage}:${error.name}:${error.message}`;
     if (signature !== lastError || Date.now() - lastErrorAt >= 60000) {
       lastError = signature; lastErrorAt = Date.now();
       let characters;
       try { characters = storage.getItem(key)?.length || 0; } catch { /* Storage permission may be the failure being reported. */ }
-      diagnosticLog('notification-history-failed',{operation,errorType:error.name,message:String(error.message).slice(0,500),characters});
+      diagnosticLog('notification-history-failed',{operation,stage,errorType:error.name,message:String(error.message).slice(0,500),characters});
       onError(error,operation);
     }
   }
@@ -48,16 +48,26 @@ export function createNotificationStore(account, { storage = localStorage, locks
     return entries;
   }
   async function update(transform, operation = 'update') {
+    let stage = 'lock';
     const change = () => {
       if (disposed) return;
+      stage = 'read';
       let previous = read();
       const before = JSON.stringify(previous), pending = pendingIntents();
+      stage = 'update';
       for (const name of pending) {
         try {
           previous = (name.startsWith(savePrefix) ? registerSaveAttempt : registerSubmission)(previous, JSON.parse(storage.getItem(name)));
         } catch { /* A malformed outbox entry cannot become a save or submission. */ }
       }
       const next = pruneNotificationState(transform(previous)), after = JSON.stringify(next);
+      stage = 'write';
+      if (after !== before) storage.setItem(key, after);
+      if (['dismiss', 'silence', 'silence-all', 'clear'].includes(operation)) {
+        diagnosticLog('notification-action-saved', {operation,
+          removedIds:Object.keys(previous.notices).filter(id => !next.notices[id]),
+          silencedKeys:Object.keys(next.muted).filter(id => !previous.muted[id])});
+      }
       for (const [id,item] of Object.entries(next.notices)) if (!previous.notices[id]) diagnosticLog('notification-created',{id,key:item.key,type:item.type,customer:item.customer});
       for (const id of Object.keys(previous.notices)) if (!next.notices[id]) diagnosticLog('notification-removed',{id});
       for (const [recordKey, item] of Object.entries(next.submissions || {})) {
@@ -66,8 +76,9 @@ export function createNotificationStore(account, { storage = localStorage, locks
       for (const [recordKey, item] of Object.entries(next.drafts || {})) {
         if (item.savedAt !== previous.drafts?.[recordKey]?.savedAt) diagnosticLog('draft-save-observed', {key:recordKey,number:item.number,savedAt:item.savedAt,reminderAt:item.savedAt+300000});
       }
-      if (after !== before) storage.setItem(key, after);
+      stage = 'outbox';
       for (const name of pending) storage.removeItem(name);
+      stage = 'display';
       if (after !== before) publish();
       return next;
     };
@@ -76,7 +87,7 @@ export function createNotificationStore(account, { storage = localStorage, locks
       const release = await acquireLocalLock(key);
       try { return change(); } finally { release(); }
     } catch (error) {
-      reportError(error,operation);
+      reportError(error,operation,stage);
       throw Object.assign(new Error('Local notification history could not be updated.',{cause:error}),{code:'NOTIFICATION_STORAGE'});
     }
   }
@@ -128,9 +139,16 @@ export function createNotificationStore(account, { storage = localStorage, locks
       return next;
     }),
     observe: (record, time) => update(state => observeRecord(state, record, time)),
-    dismiss: (id, mute = false) => update(state => dismissNotification(state, id, mute)),
-    clear: () => update(state => { acknowledgeNotices(state,Object.values(state.notices)); diagnosticLog('notifications-cleared',{count:Object.keys(state.notices).length}); return {...state,notices:{}}; }),
-    reset: () => update(() => emptyNotificationState()),
+    dismiss: (id, mute = false) => update(state => dismissNotification(state, id, mute), mute ? 'silence' : 'dismiss'),
+    silence: ids => update(state => silenceNotifications(state, ids), 'silence-all'),
+    clear: ids => update(state => {
+      const selected = ids ? ids.map(id => state.notices[id]).filter(Boolean) : Object.values(state.notices);
+      const next = {...state,notices:{...state.notices}};
+      acknowledgeNotices(next, selected);
+      for (const item of selected) delete next.notices[item.id];
+      return next;
+    }, 'clear'),
+    reset: () => update(() => emptyNotificationState(), 'reset'),
     async claim(id) {
       let claimed = false;
       await update(state => {

@@ -47,6 +47,5 @@ export async function readMonitoredRecord(record, repository, signal, options = 
   // Older session entries contain only preview products.
   if (!Array.isArray(result.documents)) result = await repository.get(record.url, {...request,fresh:true});
   const documents = result.documents || [];
-  if (!documents.length) throw Object.assign(new Error('The TIR response contains no readable requested-document fields.'),{code:'DOCUMENTS_UNAVAILABLE'});
-  return { ...record, documents };
+  return { ...record, documents, documentsUnavailable: !documents.length };
 }

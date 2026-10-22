@@ -92,3 +92,16 @@ export function dismissNotification(previous, id, mute = false) {
   } else delete state.notices[id];
   return state;
 }
+
+/** Silence only the categories selected from the tray; system notices remain intact. */
+export function silenceNotifications(previous, ids) {
+  const state = structuredClone(previous);
+  const selected = ids.map(id => state.notices[id]).filter(item => item?.muteKey && item.type !== 'update');
+  const keys = new Set(selected.map(item => item.muteKey));
+  acknowledgeNotices(state, selected);
+  for (const key of keys) state.muted[key] = true;
+  for (const [id, item] of Object.entries(state.notices)) {
+    if (item.type !== 'update' && keys.has(item.muteKey)) delete state.notices[id];
+  }
+  return state;
+}

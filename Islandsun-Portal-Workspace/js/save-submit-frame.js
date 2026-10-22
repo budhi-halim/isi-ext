@@ -10,9 +10,11 @@ import { holdForegroundAction } from './foreground-action.js';
 import { diagnosticLog } from './diagnostic-log.js';
 import { handlerId, sampleType, requestDetailUrl, tirDetailUrl } from './logic.js';
 import { SAVE_RESPONSE_WAIT_MS, SAVE_PROGRESS_NOTICE_MS, SAVE_VERIFICATION_WAIT_MS, SAVE_VERIFICATION_ATTEMPTS, SAVE_RETRY_DELAYS_MS } from './save-retry-policy.js';
+import { saveSubmitResult } from './save-submit-result.js';
+import { writeSampleContinuation, clearSampleContinuation, matchingSavedSample } from './sample-save-continuation.js';
 
 /** Own one native save response without rebuilding the user's working form. */
-export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, onSubmission, onSaved }) {
+export function createSaveSubmitFrame({ form, pending, nativeSave = false, onCommitted, onFinished, onClosed, onSubmission, onSaved }) {
   const name = `isi-save-${[...crypto.getRandomValues(new Uint32Array(4))].map(value => value.toString(16)).join('-')}`;
   let frame = document.createElement('iframe');
   frame.name = name; frame.title = 'Saving request'; frame.className = 'isi-save-frame';
@@ -20,17 +22,19 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
   // Native scripts/forms run, but cannot replace the parent, open windows or show hidden dialogs.
   frame.setAttribute('sandbox', 'allow-forms allow-scripts allow-same-origin');
   const frames = new Set([frame]);
-  const originalTarget = form.getAttribute('target');
-  const overrides = [...form.querySelectorAll('[formtarget]')].map(node => [node, node.getAttribute('formtarget')]);
+  const originalTarget = form?.getAttribute('target');
+  const overrides = [...form?.querySelectorAll('[formtarget]') || []].map(node => [node, node.getAttribute('formtarget')]);
+  const identityOnly = pending.kind === 'sample';
   const dialog = document.createElement('dialog');
   dialog.className = 'isi-portal-confirm isi-save-progress'; dialog.dataset.isiOwned = '';
   dialog.setAttribute('aria-labelledby', `${name}-title`);
   const title = document.createElement('h2'); title.id = `${name}-title`; title.textContent = 'Save & Submit';
   const message = document.createElement('p'); message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
+  const result = document.createElement('p'); result.hidden = true; result.dataset.saveResult = '';
   const progress = createRequestProgress('Request in progress');
   const choices = document.createElement('div'); choices.className = 'isi-save-choices';
   const actions = document.createElement('div'); actions.className = 'isi-dialog-actions';
-  dialog.append(title, message, progress, choices, actions);
+  dialog.append(title, result, message, progress, choices, actions);
   const requests = new AbortController();
   let state = 'prepared', disposed = false, observer, timer, checkTimer, pollTimer, locateTimer, recoveryTimer, lastDocument, savedUrl, releaseAction, beforeIndex;
   let verificationAttempt = 0, verificationStarted = 0, waitSignature = '', verificationIssue = '', progressTimer;
@@ -41,8 +45,9 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     inspect();
     if (!disposed && state !== 'finished') pollTimer = setTimeout(poll,250);
   }
-  let committed = false, submitted = false, awaitingDocument;
+  let committed = false, submitted = false, savedVerified = false, verifiedRecord, awaitingDocument;
   function restoreTarget() {
+    if (!form || nativeSave) return;
     if (originalTarget === null) form.removeAttribute('target'); else form.setAttribute('target', originalTarget);
     for (const [node, value] of overrides) if (node.isConnected) node.setAttribute('formtarget', value);
   }
@@ -50,20 +55,28 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     clearTimeout(timer);
     timer = setTimeout(callback, duration);
   }
-  function navigate(url) { if (!disposed) location.assign(url); }
   function finish(text, success = false) {
     if (disposed || state === 'finished') return;
     trace('submission-finished',{success,message:text,url:savedUrl});
     state = 'finished'; requests.abort(); clearTimeout(timer); clearTimeout(checkTimer); clearTimeout(progressTimer); clearTimeout(pollTimer); clearTimeout(locateTimer); clearTimeout(recoveryTimer); observer?.disconnect(); restoreTarget();
+    if (pending.token) clearSampleContinuation(pending.token);
     releaseAction?.(); releaseAction = null;
     for (const item of frames) { item.removeEventListener('load', inspect); item.remove(); }
     frames.clear();
     progress.hidden = true; choices.replaceChildren(); message.textContent = text;
+    const outcome = saveSubmitResult({pending,record:verifiedRecord,committed,savedVerified,submitted,success});
+    const summary = document.createElement('strong'); summary.textContent = outcome.message;
+    result.replaceChildren(summary); result.hidden = success;
     dialog.dataset.state = success ? 'success' : 'attention';
-    const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btn-primary';
-    open.textContent = savedUrl ? 'Open saved request' : 'Open request list';
-    open.addEventListener('click', () => navigate(savedUrl || new URL(pending.kind === 'tir' ? '/islandsun/master/Tir' : '/islandsun/samplerequest', location.origin).href));
-    actions.replaceChildren(open); onFinished?.({success, committed, url:savedUrl});
+    const open = document.createElement('a'); open.className = 'btn btn-primary';
+    open.textContent = outcome.url ? 'Open saved request' : 'Open request list';
+    open.href = outcome.url || new URL(pending.kind === 'tir' ? '/islandsun/master/Tir' : '/islandsun/samplerequest', location.origin).href;
+    actions.replaceChildren(open);
+    if (!committed) {
+      const close = document.createElement('button'); close.type = 'button'; close.className = 'btn btn-default'; close.textContent = 'Return to form';
+      close.addEventListener('click', () => { dialog.remove(); onClosed?.(); }); actions.append(close);
+    }
+    onFinished?.({success, committed, url:outcome.url});
     if (!dialog.open) dialog.showModal();
   }
   function retireFrames() {
@@ -108,7 +121,7 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     frame.addEventListener('load', inspect); document.body.append(frame);
     awaitingDocument = frame.contentDocument; lastDocument = undefined;
     startVerification(); frame.src = url;
-    message.textContent = `${submitted ? 'Checking whether the portal completed submission' : 'Checking the saved fields and products'} (${verificationAttempt}/${SAVE_VERIFICATION_ATTEMPTS})…`;
+    message.textContent = `${submitted ? 'Checking whether the portal completed submission' : identityOnly ? 'Opening the saved request' : 'Checking the saved fields and products'} (${verificationAttempt}/${SAVE_VERIFICATION_ATTEMPTS})…`;
     trace('submission-recovery-page', {url, phase:submitted ? 'submit' : 'save'});
   }
   function scheduleRecovery() {
@@ -190,7 +203,7 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
     let doc, href;
     try { doc = frame.contentDocument; href = frame.contentWindow.location.href; }
     catch { finish('The returned page could not be read. Check the saved request before trying again.'); return; }
-    const waiting = !doc || href === 'about:blank' || doc === awaitingDocument ? 'document-not-ready' : doc.readyState === 'loading' ? 'document-loading' : '';
+    const waiting = !doc || href === 'about:blank' || doc === awaitingDocument ? 'document-not-ready' : !identityOnly && doc.readyState === 'loading' ? 'document-loading' : '';
     if (waiting) {
       if (waitSignature !== `${waiting}:${href}`) { waitSignature = `${waiting}:${href}`; verificationIssue = waiting; trace('submission-frame-wait', {reason:waiting,url:href,attempt:verificationAttempt}); }
       return;
@@ -242,12 +255,17 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
       }
       return;
     }
-    if (!returnedAccount) { finish('The saved account could not be verified. Review the request before submitting.'); return; }
+    if (!returnedAccount) { verificationIssue = 'account-not-visible'; return; }
     if (!sameSavedRecord(pending, record)) { finish('The returned request does not match. Nothing further was submitted.'); return; }
+    if (identityOnly && Number(new URL(href).searchParams.get('srtype')) !== pending.sampleType) {
+      finish('The saved request type does not match. Nothing further was submitted.'); return;
+    }
     pending.id = record.id;
+    verifiedRecord = record;
     savedUrl = href;
     if (state !== 'verifying') startVerification();
-    const active = submissionStage(record.kind, record.status) === 'active';
+    const stage = submissionStage(record.kind, record.status);
+    const active = stage === 'active' || stage === 'complete';
     if (active && submitted) {
       finish(`${record.number} submitted to Product Marketing.`, true); return;
     }
@@ -256,22 +274,25 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
       message.textContent = `Waiting for the portal to confirm submission (${verificationAttempt}/${SAVE_VERIFICATION_ATTEMPTS})…`;
       return;
     }
+    if (!active && stage !== 'rollback') {
+      finish('This request is no longer a draft awaiting submission. Open the saved request to check its status.'); return;
+    }
     const savedForm = [...doc.querySelectorAll('.content-wrapper form')].find(item => saveContract(item.action, href)?.kind === pending.kind);
     const link = [...doc.querySelectorAll('.content-wrapper a[href]')].find(item => submissionIntent(item.href, href, record.number));
-    const actual = savedForm && saveFieldSnapshot(savedForm, pending.kind);
-    const products = savedForm && pending.products && sampleProductSnapshot(savedForm);
-    if (!savedForm || !active && !link || !sameSavedFields(pending.fields, actual)
-      || pending.products && !sameSampleProducts(pending.products,products)) {
-      message.textContent = 'Checking the saved fields and products…';
+    const actual = !identityOnly && savedForm && saveFieldSnapshot(savedForm, pending.kind);
+    const products = !identityOnly && savedForm && pending.products && sampleProductSnapshot(savedForm);
+    if (!active && !link || !identityOnly && (!savedForm || !sameSavedFields(pending.fields, actual)
+      || pending.products && !sameSampleProducts(pending.products,products))) {
+      message.textContent = identityOnly ? 'Waiting for the saved request’s Submit action…' : 'Checking the saved fields and products…';
       verificationIssue = 'saved-fields-not-matched';
-      const details = {hasForm:!!savedForm,hasSubmit:!!link,fields:Object.keys(pending.fields).filter(key => JSON.stringify(pending.fields[key]) !== JSON.stringify(actual?.[key])),productsMatch:!pending.products || sameSampleProducts(pending.products,products),
+      const details = {hasForm:!!savedForm,hasSubmit:!!link,fields:Object.keys(pending.fields || {}).filter(key => JSON.stringify(pending.fields[key]) !== JSON.stringify(actual?.[key])),productsMatch:!pending.products || sameSampleProducts(pending.products,products),
         expectedProducts:pending.products,actualProducts:products,productHeadings:[...savedForm?.querySelectorAll('#tableSP thead th') || []].map(cell=>cell.textContent.trim())};
       const signature = JSON.stringify(details);
       if (signature !== waitSignature) { waitSignature = signature; trace('submission-verification-pending',{...details,attempt:verificationAttempt}); }
       // Native Ajax may still be populating the returned form; observe it within the same deadline.
       return;
     }
-    onSaved?.();
+    savedVerified = true; onSaved?.();
     if (active) { finish(`${record.number} is saved and already submitted to Product Marketing.`, true); return; }
     const submit = async () => {
       if (disposed || submitted || state === 'finished') return;
@@ -283,6 +304,10 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
       if (disposed || state === 'finished') return;
       if (doc !== frame.contentDocument || savedPageAccount(doc) !== pending.account) {
         finish('The saved page changed during verification. Review the request before submitting.'); return;
+      }
+      if (identityOnly) {
+        try { writeSampleContinuation(pending, 'submitting'); }
+        catch { finish('Automatic submission could not be started. Open the saved request to submit it.'); return; }
       }
       trace('submission-start',{url:link.href});
       submitted = true; state = 'submitting'; verificationAttempt = 0;
@@ -297,15 +322,43 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
   }
   frame.addEventListener('load', inspect);
   dialog.addEventListener('cancel', event => event.preventDefault());
-  document.body.append(frame, dialog); form.target = name;
-  for (const [node] of overrides) node.setAttribute('formtarget', name);
+  document.body.append(dialog);
+  if (!nativeSave) {
+    document.body.append(frame);
+    if (form) form.target = name;
+    for (const [node] of overrides) node.setAttribute('formtarget', name);
+  }
   return {
+    async resume() {
+      committed = true; submitted = pending.phase === 'submitting';
+      releaseAction = holdForegroundAction('save-and-submit');
+      state = 'locating'; message.textContent = `Opening ${pending.number}…`; dialog.showModal();
+      trace('submission-continuation', {phase:pending.phase,elapsedMs:Date.now()-pending.created});
+      try {
+        await verifySaveAccount(pending.account);
+        let url = pending.id && requestDetailUrl(pending.id, pending.sampleType);
+        if (!url) {
+          const records = await readSaveIndex('sample', pending.account, requests.signal, 'after-native-save');
+          if (disposed || state === 'finished') return;
+          const record = matchingSavedSample(records, pending);
+          if (!record) { finish('The saved SRF number could not be found uniquely. Check the request list before trying again.'); return; }
+          pending.id = record.id; url = record.url;
+        }
+        if (disposed || state === 'finished') return;
+        openRecoveryPage(url); pollTimer = setTimeout(poll, 250);
+      } catch (error) {
+        if (disposed || state === 'finished') return;
+        trace('submission-continuation-failed', {errorType:error.name,message:error.message});
+        finish('The saved request could not be opened. Check the request list before trying again; Save was not repeated.');
+      }
+    },
     waitForSave() {
       if (disposed || committed) return;
       message.textContent = 'Checking the portal’s product review and saving the request…';
       if (!dialog.open) dialog.showModal();
     },
     async prepare() {
+      if (nativeSave) { releaseAction = holdForegroundAction('save-and-submit'); await verifySaveAccount(pending.account); return; }
       if (pending.id) return;
       state = 'preparing'; message.textContent = 'Preparing to save and identify this request…';
       releaseAction = holdForegroundAction('save-and-submit');
@@ -315,16 +368,24 @@ export function createSaveSubmitFrame({ form, pending, onCommitted, onFinished, 
       state = 'prepared'; dialog.close();
     },
     commit() {
-      if (disposed || committed) return;
+      if (disposed) return false;
+      if (committed) return true;
+      if (nativeSave) {
+        try { writeSampleContinuation(pending); }
+        catch { finish('Automatic submission could not be prepared. Nothing was saved. Try again later or use Save.'); return false; }
+      }
       committed = true; state = 'saving'; message.textContent = 'Saving the request…';
       releaseAction ||= holdForegroundAction('save-and-submit'); trace('submission-save-start');
       pending.fields = saveFieldSnapshot(form, pending.kind);
-      if (!dialog.open) dialog.showModal(); resetDeadline(); onCommitted?.();
-      pollTimer = setTimeout(poll,250);
+      if (!dialog.open) dialog.showModal();
+      resetDeadline(nativeSave ? () => finish('The save response is taking longer than expected. Check the request list before trying again; Save was not repeated.') : recover);
+      onCommitted?.();
+      if (!nativeSave) pollTimer = setTimeout(poll,250);
       scheduleRecovery();
+      return true;
     },
     get committed() { return committed; },
-    stop(message) { if (committed) finish(message); else this.destroy(); },
+    stop(message) { finish(message); },
     destroy() {
       if (disposed) return;
       disposed = true; requests.abort(); clearTimeout(timer); clearTimeout(checkTimer); clearTimeout(progressTimer); clearTimeout(pollTimer); clearTimeout(locateTimer); clearTimeout(recoveryTimer); observer?.disconnect(); restoreTarget();

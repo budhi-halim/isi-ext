@@ -6,6 +6,7 @@ export const DOCUMENT_WINDOW_MS = 30 * DAY;
 
 /** Keep one current revision per document, never an unlimited revision history. */
 export function documentBaseline(record, previous = {}, now = Date.now()) {
+  if (record.documentsUnavailable) return structuredClone(previous);
   const fallback = calendarDay(record.date);
   return Object.fromEntries((record.documents || []).map(document => {
     const old = previous[document.id];

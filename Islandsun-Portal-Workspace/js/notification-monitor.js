@@ -6,7 +6,7 @@ import { INDEX_FRESH_MS, PREVIEW_FRESH_MS, statusSignature } from './fetch-polic
 import { shouldMonitorTir, documentBaseline } from './tir-document-policy.js';
 import { checkTirDocuments } from './tir-document-check.js';
 import { diagnosticLog } from './diagnostic-log.js';
-import { OFFLINE_STATUS } from './offline-config.js';
+import { OFFLINE_STATUS, PORTAL_HOME } from './offline-config.js';
 import { nextNotificationRead, previewQueue } from './monitor-schedule.js';
 
 /** Persist the current schedule so page changes and browser restarts do not restart discovery. */
@@ -20,7 +20,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
   let retry = 15000;
   let previewCacheChecked = false;
   let pendingObservation;
-  let memory = store.read().monitor || {records:[],checked:{},indexedAt:0,warmup:{},tir:{}};
+  let memory = {records:[],checked:{},indexedAt:0,warmup:{},tir:{}}, restoreRequired = true;
   const schedule = delay => { clearTimeout(timer); if (!disposed) timer = setTimeout(tick,delay); };
   async function checkpoint() {
     if (!disposed) await store.saveMonitor?.(memory);
@@ -49,7 +49,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
       : memory.warmup.completedAt ? warmupQueue() : [];
     for (const key of completed) {
       const record = byKey.get(key);
-      if (!record || memory.checked[key]?.retryAt > Date.now()) continue;
+      if (!record || memory.checked[key]?.retryKind !== 'documents' && memory.checked[key]?.retryAt > Date.now()) continue;
       if (repository.hasFresh && !await repository.hasFresh(record.url)) {
         signal.throwIfAborted();
         memory.warmup = {queue:warmupQueue(),cursor:0,startedAt:Date.now()};
@@ -65,23 +65,29 @@ export function createNotificationMonitor(store, repository, notices, accountNam
     const key = `${record.kind}:${record.id}`, previous = memory.checked[key];
     const signature = statusSignature(record);
     const changed = previous && previous.signature !== signature;
-    async function retain(result, verifiedDocuments) {
+    let stage = 'detail';
+    async function retain(result, verifiedDocuments, complete = false) {
       signal.throwIfAborted();
-      pendingObservation = {key,result,checked:{...memory.checked[key],signature,at:Date.now(),snapshot:result,retryAt:0,failures:0,
-        ...(record.kind === 'tir' ? {documents:verifiedDocuments ? Object.fromEntries(result.documents.map(item=>[item.id,item])) : documentBaseline(result,previous?.documents)} : {})}};
+      const keepDocumentRetry = memory.checked[key]?.retryKind === 'documents' && !(verifiedDocuments && complete);
+      pendingObservation = {key,result,checked:{...memory.checked[key],signature,at:Date.now(),snapshot:result,
+        ...(!keepDocumentRetry ? {retryAt:0,failures:0,retryKind:null} : {}),
+        ...(record.kind === 'tir' ? {documents:verifiedDocuments && !result.documentsUnavailable ? Object.fromEntries(result.documents.map(item=>[item.id,item])) : documentBaseline(result,previous?.documents)} : {})}};
       await retainPending(signal);
     }
     try {
       let result = await readRecord(record,repository,signal,{purpose,reason,fresh:!!changed});
-      if (documents && record.kind === 'tir') result = await checkDocuments(result,previous,signal,partial => retain(partial,true));
-      await retain(result,documents);
+      if (documents && record.kind === 'tir') {
+        stage = 'documents';
+        result = await checkDocuments(result,previous,signal,partial => retain(partial,true));
+      }
+      await retain(result,documents,true);
       diagnosticLog('monitor-observed',{kind:record.kind,number:record.number,purpose,statusChanged:!!changed,documents});
       return true;
     } catch (error) {
       if (signal.aborted || error.code === 'NOTIFICATION_STORAGE' || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
       const failures = (memory.checked[key]?.failures || 0) + 1;
       const delay = Math.min(2*3600000,60000*2**Math.min(failures-1,7));
-      memory.checked[key] = {...memory.checked[key],failures,retrySignature:signature,retryAt:Date.now()+delay};
+      memory.checked[key] = {...memory.checked[key],failures,retryKind:stage,retrySignature:signature,retryAt:Date.now()+delay};
       diagnosticLog('monitor-retry',{kind:record.kind,number:record.number,purpose,reason,retryAt:memory.checked[key].retryAt,failures,errorType:error.name,code:error.code,message:String(error.message).slice(0,500)});
       activity.note(`record-retry:${key}`,`${record.number || record.kind}: ${purpose === 'warmup' ? 'hover warm-up' : 'notification check'} failed; retry at ${activityTime(memory.checked[key].retryAt)}. Other eligible records can continue.`);
       await checkpoint(); return false;
@@ -97,9 +103,10 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         const release = await acquireLock(`${store.key}:monitor`,{wait:false,onLost:() => { releaseLeadership = null; controller?.abort(); schedule(5000); }});
         if (disposed || signal.aborted) { release?.(); return; }
         releaseLeadership = release;
-        if (release) { memory = store.read().monitor || memory; previewCacheChecked = false; }
+        if (release) { restoreRequired = true; previewCacheChecked = false; }
       }
       if (!releaseLeadership) { activity.pause('other-tab'); schedule(5000); return; }
+      if (restoreRequired) { memory = store.read().monitor || memory; restoreRequired = false; }
       await retainPending(signal);
       await store.advanceReminders?.();
       if (!memory.indexedAt || Date.now()-memory.indexedAt >= INDEX_FRESH_MS) {
@@ -119,7 +126,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
           const previous = memory.checked[`${record.kind}:${record.id}`];
           if (previous?.snapshot && previous.signature === statusSignature(record)) await store.observe({...previous.snapshot,...record});
         }
-        await checkpoint(); notices.dismiss('notification-session');
+        await checkpoint(); notices.dismiss('portal-sign-in');
         diagnosticLog('monitor-index',{records:index.length,intervalMs:INDEX_FRESH_MS});
         activity.note(`index:${memory.indexedAt}`,`Lists checked: ${index.filter(record => record.kind === 'sample').length} Sample, ${index.filter(record => record.kind === 'tir').length} TIR. Unchanged verified details are reused.`);
       }
@@ -136,7 +143,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
           const page = Math.floor(prior / memory.pageSize) + 1;
           activity.note(`preview:${memory.warmup.startedAt}:${record.kind}:${page}`,`Hover warm-up: ${record.kind === 'sample' ? 'Sample' : 'TIR'} page ${page}/3, up to ${memory.pageSize} records; fresh cached results need no request.`,Infinity);
         }
-        if (record && !(memory.checked[key]?.retryAt > Date.now())) { activity.resume(); await observe(record,signal,'warmup'); }
+        if (record && !(memory.checked[key]?.retryKind !== 'documents' && memory.checked[key]?.retryAt > Date.now())) { activity.resume(); await observe(record,signal,'warmup'); }
         memory.warmup.cursor++;
         if (memory.warmup.cursor >= memory.warmup.queue.length) {
           memory.warmup = {completedAt:Date.now()}; diagnosticLog('warmup-complete',{records:Math.min(memory.records.length,memory.pageSize*6)});
@@ -180,7 +187,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
     } catch (error) {
       if (!signal.aborted && !disposed) {
         if (error.message === 'session' || /session has expired/i.test(error.message)) {
-          notices.notify('Sign in again to resume notifications.',{key:'notification-session',error:true}); activity.pause('signed-out',Date.now()+60000); schedule(60000);
+          notices.notify('Your portal session expired. Sign in again.',{key:'portal-sign-in',tone:'warning',href:`${PORTAL_HOME}login`}); activity.pause('signed-out',Date.now()+60000); schedule(60000);
         } else { activity.pause(error.code === 'NOTIFICATION_STORAGE' ? 'notification-storage' : 'retry',Date.now()+retry); diagnosticLog('monitor-paused',{errorType:error.name,code:error.code,message:String(error.message).slice(0,500),localRetry:!!pendingObservation,retryAt:Date.now()+retry}); schedule(retry); retry = Math.min(retry*2,120000); }
       }
     } finally { busy = false; controller = null; if (signal.aborted && !disposed) schedule(1000); }

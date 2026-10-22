@@ -61,7 +61,7 @@ body.offline-workspace { --offline-header-height: 76px; margin: 0; height: 100sv
 .offline-workspace *, .offline-workspace *::before, .offline-workspace *::after { box-sizing: border-box; }
 .offline-workspace button, .offline-workspace input, .offline-workspace select { font: inherit; }
 .offline-workspace [hidden] { display: none !important; }
-.offline-workspace :focus-visible { outline: 2px solid var(--isi-primary); outline-offset: 3px; }
+.offline-workspace :focus-visible { outline: 2px solid var(--isi-primary); outline-offset: -2px; }
 .offline-header { position: sticky; top: 0; z-index: 30; min-height: var(--offline-header-height); padding: 12px 24px 12px 16px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--isi-border); background: var(--isi-surface); }
 .offline-header .isi-brand { flex: 0 0 180px; color: var(--isi-text); }
 .offline-actions { display: flex; align-items: center; gap: 16px; margin-left: auto; min-width: 0; }

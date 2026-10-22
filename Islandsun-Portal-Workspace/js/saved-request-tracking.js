@@ -11,7 +11,8 @@ export function createSavedRequestTracking(store, reportError) {
   const initialForm = document.querySelector('.content-wrapper form');
   const initial = initialForm && saveContract(initialForm.action, location.href);
   if (initial?.kind === 'tir' && !initial.id) {
-    const monitor = store.read().monitor;
+    let monitor;
+    try { monitor = store.read().monitor; } catch (error) { reportError(error); }
     if (monitor?.indexedAt && Array.isArray(monitor.records)) beforeIds = monitor.records.filter(record => record.kind === 'tir').map(record => record.id);
     else readSaveIndex('tir', store.account, events.signal, 'save-reminder-baseline').then(records => {
       if (!disposed) beforeIds = [...records.keys()];
@@ -26,7 +27,7 @@ export function createSavedRequestTracking(store, reportError) {
     recorded.set(form, Date.now());
     try {
       store.registerSave({...contract, number:contract.kind === 'sample' ? sampleRequestNumber() : null, ...(beforeIds ? {beforeIds} : {})});
-    } catch { reportError(); }
+    } catch (error) { reportError(error); }
   }
   window.addEventListener('submit', event => {
     queueMicrotask(() => { if (!event.defaultPrevented) capture(event.target); });

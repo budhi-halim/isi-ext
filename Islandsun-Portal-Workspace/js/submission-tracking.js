@@ -30,7 +30,7 @@ export function createSubmissionTracking(store, reportError) {
     const intent = record && submissionIntent(anchor.href, location.href, record.number);
     if (intent) {
       // Synchronous outbox persistence survives the anchor's immediate navigation.
-      try { store.registerSubmission(intent); } catch { reportError(); }
+      try { store.registerSubmission(intent); } catch (error) { reportError(error); }
     }
   }
   const click = event => {

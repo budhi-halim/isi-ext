@@ -9,7 +9,8 @@ import { samplePrintUrl, sampleSheetFile } from './offline-sample-print.js';
 import { archiveFailure, connectionUpdate } from './offline-connection.js';
 import { archiveWaitState } from './offline-wait.js';
 import { connectionFailure, sanitizeDiagnostic } from './connection-diagnostics.js';
-import { archiveMeta, readArchive, nextDetail, updateDetail, completeDetailCapture, retryDetail, postponeDetail, recordFiles, saveFile, clearArchive, archiveUsage } from './offline-store.js';
+import { archiveMeta, readArchive, nextDetail, updateDetail, completeDetailCapture, retryDetail, postponeDetail, recordFiles, saveFile, clearArchive, archiveStorageUsage } from './offline-store.js';
+import { ARCHIVE_CLEANUP, createArchiveCleanupProgress, recoverArchiveCleanup } from './archive-cleanup-progress.js';
 import { ACCOUNT_SCOPE, setAccountScope, scopedAccount } from './account-scope.js';
 import { pauseAuthenticationWrites } from './offline-auth-service.js';
 import { purgeCaptures } from './debug-capture-store.js';
@@ -96,7 +97,10 @@ export function startOfflineService(gate, diagnostics, debug) {
   const reportedFailures = new WeakSet();
   let trace = {};
   const note = (event,fields={}) => debug?.note(event,{...trace,...fields}) || Promise.resolve();
+  const cleanupRecovery = recoverArchiveCleanup();
+  cleanupRecovery.catch(error => { void note('archive-cleanup-recovery-failed',{errorType:error.name,message:error.message}); });
   async function observedSettings(message) {
+    await cleanupRecovery;
     const settings = await readAccountSettings();
     const reset = (await chrome.storage.local.get('islandsun.archive-reset'))['islandsun.archive-reset'];
     if (reset && (!reset.account || reset.account === message.account) && (reset.clearing || message.observedAt <= reset.at)) return {...settings,enabled:false};
@@ -181,6 +185,7 @@ export function startOfflineService(gate, diagnostics, debug) {
     await configure();
   }
   async function tick() {
+    await cleanupRecovery;
     if (running || deleting) return;
     completion = new Promise(resolve => { finish = resolve; });
     running = true; controller = new AbortController();
@@ -494,6 +499,7 @@ export function startOfflineService(gate, diagnostics, debug) {
     }
   }
   async function configure() {
+    await cleanupRecovery;
     const settings = await readAccountSettings();
     const previous = (await chrome.storage.local.get(OFFLINE_STATUS))[OFFLINE_STATUS] || {};
     if (!settings.enabled || settings.account && !settings.offlineArchive && !previous.hadOutage) { controller?.abort(); await chrome.alarms.clear(ALARM); await status({state:'paused'}); return; }
@@ -567,32 +573,49 @@ export function startOfflineService(gate, diagnostics, debug) {
         const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
         const account = scopedAccount(scope);
         if (!account) throw new Error('Sign in to manage saved storage.');
-        return {account,name:scope.name || account,all:await archiveUsage(),current:await archiveUsage(account)};
+        return {account,name:scope.name || account,...await archiveStorageUsage(account)};
       })().then(value => respond({ok:true,value}),() => respond({ok:false}));
+      return true;
+    }
+    if (message?.type === 'offline-cleanup-status') {
+      cleanupRecovery.then(() => chrome.storage.local.get(ARCHIVE_CLEANUP))
+        .then(saved => respond({ok:true,value:saved[ARCHIVE_CLEANUP]}),() => respond({ok:false}));
       return true;
     }
     if (message?.type === 'offline-clear') {
       (async () => {
+        await cleanupRecovery;
         if (deleting) throw new Error('Storage cleanup is already running.');
         if (!['all','account'].includes(message.scope)) throw new Error('Choose which saved records to delete.');
         const settings = await chrome.storage.local.get([ACCOUNT_SCOPE,OFFLINE_STATUS]);
         const account = scopedAccount(settings[ACCOUNT_SCOPE],settings[OFFLINE_STATUS]);
         if (!account || message.account !== account) throw new Error('The account changed. Reopen settings before deleting.');
+        if (deleting) throw new Error('Storage cleanup is already running.');
         deleting = true;
+        const target = message.scope === 'all' ? null : account;
+        const progress = createArchiveCleanupProgress(account,message.scope);
         try {
-          await chrome.storage.local.set({'islandsun.archive-reset':{account:message.scope === 'all' ? null : account,at:Date.now(),clearing:true}});
+          await progress({phase:'stopping'});
+          await chrome.storage.local.set({'islandsun.archive-reset':{account:target,at:Date.now(),clearing:true}});
           controller?.abort();
           await completion;
           await Promise.allSettled([...observations]);
-          await purgeCaptures(message.scope === 'all' ? null : account);
-          await pauseAuthenticationWrites(() => clearArchive(message.scope === 'all' ? null : account));
-          await clearOfflineSession(message.scope === 'all' ? null : account);
-          await clearProductSessions(message.scope === 'all' ? null : account);
-          await clearJournal(message.scope === 'all' ? null : account);
-          await chrome.storage.local.set({'islandsun.archive-reset':{account:message.scope === 'all' ? null : account,at:Date.now()}});
+          await pauseAuthenticationWrites(() => clearArchive(target,{onProgress:progress}));
+          await clearOfflineSession(target);
+          await clearProductSessions(target);
+          await progress({phase:'history',completed:0,total:0});
+          await purgeCaptures(target);
+          await clearJournal(target,{onProgress:progress});
           const currentSettings = await readAccountSettings();
           await status({state:currentSettings.offlineArchive ? 'waiting' : 'paused',clearedAt:Date.now(),error:'',syncedAt:0});
-        } finally { deleting = false; }
+          await progress({state:'complete',completed:0,total:0});
+        } catch (error) {
+          await progress({state:'failed'});
+          throw error;
+        } finally {
+          try { await chrome.storage.local.set({'islandsun.archive-reset':{account:target,at:Date.now()}}); }
+          finally { deleting = false; }
+        }
         await note('archive-cleared',{scope:message.scope,account,settingsPreserved:true});
         void tick();
       })().then(() => respond({ok:true}),error => respond({ok:false,error:error.message}));

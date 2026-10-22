@@ -6,6 +6,8 @@ import { notificationTone } from './submission-logic.js';
 import { createTrayClearMotion } from './tray-clear-motion.js';
 import { submissionRecord } from './submission-logic.js';
 import { silenceDescription } from './notification-types.js';
+import { createNotificationActions } from './notification-actions.js';
+import { diagnosticLog } from './diagnostic-log.js';
 
 function destination(item) {
   if (item.type === 'update' && item.url === UPDATE_PAGE) return UPDATE_PAGE;
@@ -34,10 +36,34 @@ export function createNotificationCenter(store, notices) {
   const updateBadge = document.createElement('span'); updateBadge.className = 'isi-notification-count isi-notification-count--update'; button.append(updateBadge);
   badge.setAttribute('aria-hidden', 'true'); updateBadge.setAttribute('aria-hidden', 'true');
   target.insertBefore(button, document.querySelector('#isi-portal-theme'));
-  const reportError = () => notices.notify('Notifications could not be updated in this browser. Please try again; your portal requests are unaffected.', { key:'notification-history-error', error: true });
-  function dismiss(id) { store.dismiss(id).catch(reportError); }
+  let lastError = '', lastErrorAt = 0;
+  const reportError = error => {
+    const message = String(error?.message || 'Notification history unavailable').slice(0,500);
+    if (message === lastError && Date.now() - lastErrorAt < 60000) return;
+    lastError = message; lastErrorAt = Date.now();
+    diagnosticLog('notification-display-failed', {errorType:error?.name,message});
+  };
+  const mutations = createNotificationActions({
+    onBusy: busy => {
+      if (!busy) { try { sync(store.read()); } catch (error) { reportError(error); } }
+      renderBusy();
+    },
+    onError: (message, action) => notices.notify(message, {key:`notification-action-${action}`,error:true}),
+  });
+  function renderBusy() {
+    const busy = mutations.busy;
+    for (const control of document.querySelectorAll('.isi-notification-entry button,.isi-portal-toast .isi-toast-button')) control.disabled = busy;
+    if (dialog) {
+      dialog.querySelector('[data-clear-notices]').disabled = busy || !dialog.querySelector('[data-notice-id]:not([data-notice-leaving]):not([data-notice-queued])');
+      dialog.querySelector('[data-silence-notices]').disabled = busy || !dialog.querySelector('[data-notice-id]:not([data-notice-leaving]):not([data-notice-queued]) [aria-label="Silence this notification type"]');
+      const reset = dialog.querySelector('[data-reset-notices]');
+      if (reset) reset.disabled = busy;
+    }
+    for (const control of confirmation?.querySelectorAll('button') || []) control.disabled = busy;
+  }
+  function dismiss(id) { return mutations.run('dismiss', () => store.dismiss(id), {key:`dismiss:${id}`}); }
   function closeTray(focusBell = true) { if (dialog) { restoreFocus = focusBell; const current = dialog; exitSurface(current, () => current.close()); } }
-  function closeConfirmation() { if (confirmation) { const current = confirmation; exitSurface(current, () => current.close()); } }
+  function closeConfirmation() { if (confirmation && !mutations.busy) { const current = confirmation; exitSurface(current, () => current.close()); } }
   function positionTray() {
     if (!dialog) return;
     const anchor = button.getBoundingClientRect();
@@ -48,17 +74,23 @@ export function createNotificationCenter(store, notices) {
   }
 
   function mute(item) {
-    if (confirmation) return;
+    confirmSilence([item]);
+  }
+
+  function confirmSilence(items, all = false) {
+    if (confirmation || mutations.busy) return;
+    if (!items.length) return;
     confirmation = document.createElement('dialog'); confirmation.className = 'isi-portal-products'; confirmation.dataset.isiOwned = '';
-    const title = document.createElement('h2'); title.id = 'isi-mute-title'; title.textContent = 'Silence this notification type?';
-    const text = document.createElement('p'); text.textContent = silenceDescription(item);
+    const title = document.createElement('h2'); title.id = 'isi-mute-title'; title.textContent = all ? 'Silence all eligible notifications?' : 'Silence this notification type?';
+    const text = document.createElement('p'); text.textContent = all
+      ? `Silence and remove ${items.length} ${items.length === 1 ? 'notification' : 'notifications'} from this tray? Future notifications of these types for these requests will be silenced. Other types and notifications that cannot be silenced will remain unchanged.`
+      : silenceDescription(items[0]);
     const actions = document.createElement('div'); actions.className = 'isi-dialog-actions';
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'isi-portal-button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', closeConfirmation);
-    const confirm = document.createElement('button'); confirm.type = 'button'; confirm.className = 'isi-portal-button'; confirm.textContent = 'Silence';
+    const confirm = document.createElement('button'); confirm.type = 'button'; confirm.className = 'isi-portal-button'; confirm.textContent = all ? 'Silence all' : 'Silence';
     confirm.addEventListener('click', async () => {
-      confirm.disabled = true;
-      try { await store.dismiss(item.id, true); closeConfirmation(); }
-      catch { confirm.disabled = false; reportError(); }
+      const action = all ? 'silence-all' : 'silence';
+      if (await mutations.run(action, () => all ? store.silence(items.map(item => item.id)) : store.dismiss(items[0].id, true), {key:`${action}:${items.map(item => item.id).join(',')}`})) closeConfirmation();
     });
     const close = iconButton('close', 'Close confirmation', closeConfirmation); close.classList.add('isi-portal-dialog-close');
     actions.append(cancel, confirm); confirmation.append(title, text, actions, close);
@@ -69,7 +101,7 @@ export function createNotificationCenter(store, notices) {
   }
 
   function resetHistory() {
-    if (confirmation) return;
+    if (confirmation || mutations.busy) return;
     confirmation = document.createElement('dialog'); confirmation.className = 'isi-portal-products'; confirmation.dataset.isiOwned = '';
     const title = document.createElement('h2'); title.id = 'isi-reset-notices-title'; title.textContent = 'Reset notification history?';
     const text = document.createElement('p'); text.textContent = 'Reset dismissed notifications and silenced reminders for this account, plus extension update reminders on this browser. Eligible reminders will appear again after the next check.';
@@ -77,9 +109,7 @@ export function createNotificationCenter(store, notices) {
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'isi-portal-button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', closeConfirmation);
     const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'isi-portal-button'; reset.textContent = 'Reset history';
     reset.addEventListener('click', async () => {
-      reset.disabled = true; cancel.disabled = true;
-      try { await store.reset(); closeConfirmation(); notices.notify('Notification history reset.'); }
-      catch { reset.disabled = false; cancel.disabled = false; reportError(); }
+      if (await mutations.run('reset', () => store.reset(), {attempts:1})) { closeConfirmation(); notices.notify('Notification history reset.'); }
     });
     actions.append(cancel, reset); confirmation.append(title, text, actions); confirmation.setAttribute('aria-labelledby', title.id);
     confirmation.addEventListener('cancel', event => { event.preventDefault(); if (!reset.disabled) closeConfirmation(); });
@@ -106,6 +136,7 @@ export function createNotificationCenter(store, notices) {
       clearDepartures(); listMotion.destroy();
       dialog.querySelector('[aria-label="Close notifications"]').focus({preventScroll:true});
       dialog.querySelector('[data-clear-notices]').disabled = true;
+      dialog.querySelector('[data-silence-notices]').disabled = true;
       clearMotion.remove(list,[...rows.values()],emptyState);
       return;
     }
@@ -160,7 +191,7 @@ export function createNotificationCenter(store, notices) {
       next = row.nextElementSibling;
     }
     emptyState();
-    dialog.querySelector('[data-clear-notices]').disabled = !items.length;
+    renderBusy();
   }
 
   function sync(state) {
@@ -183,7 +214,7 @@ export function createNotificationCenter(store, notices) {
         key: item.id, tone: notificationTone(item.type), onDismiss: () => dismiss(item.id), onMute: item.muteKey ? () => mute(item) : undefined,
         beforeShow: () => store.claim(item.id), isCurrent: () => Boolean(store.read().notices[item.id]),
         onSkip: () => { scheduled.delete(item.id); return store.release(item.id).catch(reportError); },
-        onShow: () => { shown.add(item.id); store.delivered(item.id).catch(reportError); },
+        onShow: () => { shown.add(item.id); renderBusy(); store.delivered(item.id).catch(reportError); },
       });
       if (accepted === false) scheduled.delete(item.id);
     }
@@ -192,19 +223,34 @@ export function createNotificationCenter(store, notices) {
   function open() {
     if (dialog) { closeTray(); return; }
     let state;
-    try { state = store.read(); } catch { reportError(); return; }
+    try { state = store.read(); } catch (error) {
+      reportError(error);
+      notices.notify('Couldn’t open notifications. Please try again later.', {key:'notification-open-error',error:true});
+      return;
+    }
     rendered = '';
     dialog = document.createElement('dialog'); dialog.className = 'isi-portal-products isi-notification-center'; dialog.dataset.isiOwned = '';
     const heading = document.createElement('h2'); heading.textContent = 'Notifications'; heading.id = 'isi-notification-title';
     const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'isi-portal-button'; clear.textContent = 'Clear all'; clear.dataset.clearNotices = '';
-    clear.addEventListener('click', () => store.clear().catch(reportError));
+    const silence = document.createElement('button'); silence.type = 'button'; silence.className = 'isi-portal-button'; silence.textContent = 'Silence all'; silence.dataset.silenceNotices = '';
+    silence.addEventListener('click', () => {
+      try { confirmSilence(orderedNotices(store.read()).filter(item => item.muteKey && item.type !== 'update'), true); }
+      catch (error) { reportError(error); notices.notify('Couldn’t open notifications. Please try again later.', {key:'notification-open-error',error:true}); }
+    });
+    clear.addEventListener('click', () => {
+      let ids;
+      void mutations.run('clear', () => {
+        ids ||= Object.keys(store.read().notices);
+        return store.clear(ids);
+      });
+    });
     const list = document.createElement('div'); list.dataset.noticeList = '';
     const close = iconButton('close', 'Close notifications', () => closeTray());
-    const header = document.createElement('header'); header.className = 'isi-notification-header'; header.append(heading, clear, close);
+    const header = document.createElement('header'); header.className = 'isi-notification-header'; header.append(heading, silence, clear, close);
     dialog.append(header, list); dialog.setAttribute('aria-labelledby', heading.id);
     if (store.reset) {
       const footer = document.createElement('footer'); footer.className = 'isi-dialog-actions';
-      const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'isi-portal-button'; reset.textContent = 'Reset notification history'; reset.addEventListener('click', resetHistory);
+      const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'isi-portal-button'; reset.textContent = 'Reset notification history'; reset.dataset.resetNotices = ''; reset.addEventListener('click', resetHistory);
       footer.append(reset); dialog.append(footer);
     }
     restoreFocus = true;
@@ -215,8 +261,8 @@ export function createNotificationCenter(store, notices) {
   const escape = event => { if (event.key === 'Escape' && dialog && !confirmation) { event.preventDefault(); closeTray(); } };
   document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape);
   window.addEventListener('resize', positionTray); document.addEventListener('scroll', positionTray, true);
-  const unsubscribe = store.subscribe(sync), focus = () => { try { sync(store.read()); } catch { reportError(); } };
+  const unsubscribe = store.subscribe(sync), focus = () => { try { sync(store.read()); } catch (error) { reportError(error); } };
   const retryClaims = setInterval(focus, 5000);
   window.addEventListener('focus', focus); document.addEventListener('visibilitychange', focus); focus();
-  return { destroy() { disposed = true; clearInterval(retryClaims); unsubscribe(); window.removeEventListener('focus', focus); document.removeEventListener('visibilitychange', focus); document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); window.removeEventListener('resize', positionTray); document.removeEventListener('scroll', positionTray, true); confirmation?.close(); dialog?.close(); button.remove(); } };
+  return { destroy() { disposed = true; mutations.destroy(); clearInterval(retryClaims); unsubscribe(); window.removeEventListener('focus', focus); document.removeEventListener('visibilitychange', focus); document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); window.removeEventListener('resize', positionTray); document.removeEventListener('scroll', positionTray, true); confirmation?.close(); dialog?.close(); button.remove(); } };
 }

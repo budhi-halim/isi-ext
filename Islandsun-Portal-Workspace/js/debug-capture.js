@@ -15,6 +15,11 @@ export function startDebugCapture() {
   const clientRequests=new Map();
   const ready=chrome.storage.session.get(POINTER).then(saved=>{active=saved[POINTER] || null;});
   let journalFailure = false;
+  function track(operation) {
+    pending.add(operation);
+    operation.then(() => pending.delete(operation), () => pending.delete(operation));
+    return operation;
+  }
   async function captureContext() {
     const manual = await current();
     if (manual) return manual;
@@ -64,18 +69,22 @@ export function startDebugCapture() {
     const request={url:safeRequestUrl(String(url)),method:options.method || 'GET',body:safeRequestBody(options.body),credentials:options.credentials || 'same-origin',redirect:options.redirect || 'follow',cache:options.cache || 'default',timeoutMs:context.timeoutMs,initiator:'extension-service-worker',referrerPolicy:options.referrerPolicy || 'browser-default'};
     const headers=new Headers(options.headers);
     request.headers=Object.fromEntries(['accept','content-type','x-requested-with'].flatMap(name=>headers.has(name)?[[name,headers.get(name)]]:[]));
-    await note('request-start',{...context,attemptId,request},session);
+    const startedLog = track(note('request-start',{...context,attemptId,request},session));
     const networkStartedAt=Date.now();
     let response;
     try { response=await fetch(url,options); }
-    catch(error){await note('request-failed',{...context,attemptId,durationMs:Date.now()-startedAt,fetchMs:Date.now()-networkStartedAt,diagnosticStartMs:networkStartedAt-startedAt,errorType:error.name,failure:true},session);throw error;}
+    catch(error){track(startedLog.then(() => note('request-failed',{...context,attemptId,durationMs:Date.now()-startedAt,fetchMs:Date.now()-networkStartedAt,diagnosticStartMs:networkStartedAt-startedAt,errorType:error.name,failure:true},session)));throw error;}
     const headersAt=Date.now();
-    await note('response-headers',{...context,attemptId,status:response.status,type:response.type,url:safeRequestUrl(response.url || url),headers:responseHeaders(response.headers),headersMs:headersAt-networkStartedAt,diagnosticStartMs:networkStartedAt-startedAt,failure:response.status>=400},session);
+    const headersLog = track(startedLog.then(() => note('response-headers',{...context,attemptId,status:response.status,type:response.type,url:safeRequestUrl(response.url || url),headers:responseHeaders(response.headers),headersMs:headersAt-networkStartedAt,diagnosticStartMs:networkStartedAt-startedAt,failure:response.status>=400},session)));
     const bodyStartedAt=Date.now();
-    try {
-      const body=await captureResponseBody(response);
-      await note('response-body',{...context,attemptId,body,bodyMs:Date.now()-bodyStartedAt,diagnosticHeadersMs:bodyStartedAt-headersAt,durationMs:Date.now()-startedAt},session);
-    } catch(error){await note('capture-body-failed',{...context,attemptId,errorType:error.name,failure:true},session);}
+    track(captureResponseBody(response).then(async body => {
+      const timings = {bodyMs:Date.now()-bodyStartedAt,diagnosticHeadersMs:bodyStartedAt-headersAt,durationMs:Date.now()-startedAt};
+      await headersLog;
+      await note('response-body',{...context,attemptId,body,...timings},session);
+    }, async error => {
+      await headersLog;
+      await note('capture-body-failed',{...context,attemptId,errorType:error.name,failure:true},session);
+    }));
     return response;
   }
   chrome.storage.onChanged.addListener((changes,area)=>{
@@ -162,7 +171,7 @@ export function startDebugCapture() {
         if(clientRequests.size) await note('capture-client-inflight',{attemptIds:[...clientRequests.keys()],note:'Content responses may still be running or their page may have navigated away.'});
         closing=true;
         try {
-          await Promise.allSettled([...pending]);
+          while (pending.size) await Promise.allSettled([...pending]);
           await stopCapture(identity.account);active=null;await chrome.storage.session.remove(POINTER);
         } finally {closing=false;}
       }
@@ -172,8 +181,6 @@ export function startDebugCapture() {
   });
   note('worker-start',{version:chrome.runtime.getManifest().version}).catch(()=>{});
   return {note,recording:()=>true,fetch(url,options,context){
-    const operation=read(url,options,context);pending.add(operation);
-    operation.then(()=>pending.delete(operation),()=>pending.delete(operation));
-    return operation;
+    return track(read(url,options,context));
   }};
 }

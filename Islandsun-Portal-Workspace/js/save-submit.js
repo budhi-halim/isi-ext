@@ -5,13 +5,12 @@ import { labelSaveAction } from './icons.js';
 import { sampleRequestNumber, sampleProductSnapshot, sampleReviewMatches } from './sample-save-snapshot.js';
 import { createSaveSubmitFrame } from './save-submit-frame.js';
 import { diagnosticLog } from './diagnostic-log.js';
+import { readSampleContinuation } from './sample-save-continuation.js';
 
 /** Add the explicit two-stage action while leaving ordinary native Save intact. */
 export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSaved }) {
   const events = new AbortController(), buttons = new Map(), groups = new Map(), locked = new WeakSet();
   let active, disposed = false, timer;
-  // Old navigation continuations must never replay alongside a frame-owned transaction.
-  try { sessionStorage.removeItem('islandsun.portal.save-submit'); } catch { /* No continuation is required. */ }
   function syncButtons() {
     for (const [save, button] of buttons) {
       const contract = saveContract(save.form.action, location.href);
@@ -23,7 +22,7 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
     }
   }
   function continueProductReview() {
-    if (!active?.authorized || active.reviewed || active.transaction.committed) return;
+    if (!active?.authorized || active.finished || active.reviewed || active.transaction.committed) return;
     const review = document.querySelector('#modal-produk-masuk');
     if (!review?.getClientRects().length || getComputedStyle(review).display === 'none') return;
     const save = [...review.querySelectorAll('button[onclick],input[onclick]')].filter(button => /^(save|simpan)$/i.test((button.textContent || button.value).trim()));
@@ -34,19 +33,20 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
   }
   const observer = new MutationObserver(() => { syncButtons(); continueProductReview(); });
   observer.observe(document.body, {subtree:true, childList:true, characterData:true, attributes:true, attributeFilter:['style','class','hidden','disabled','data-isi-read-only']});
-  function cancelPrepared() {
-    if (!active || active.transaction.committed) return;
+  function cancelPrepared(allowFinished = false) {
+    if (!active || active.transaction.committed || active.finished && allowFinished !== true) return;
     active.transaction.destroy(); delete active.form.dataset.isiSaveSubmit; delete active.form.dataset.isiSaveSubmitAuthorized; active = null;
     clearTimeout(timer); syncButtons();
   }
   function commit(form) {
-    if (disposed || form !== active?.form || !canEdit(form)) return;
-    active.transaction.commit(); clearTimeout(timer);
+    if (disposed || active?.finished || form !== active?.form || !canEdit(form)) return true;
+    const committed = active.transaction.commit(); clearTimeout(timer);
+    return committed;
   }
   window.addEventListener('submit', event => {
-    queueMicrotask(() => { if (!disposed && !event.defaultPrevented) commit(event.target); });
+    if (!disposed && !event.defaultPrevented && commit(event.target) === false) event.preventDefault();
   }, {signal:events.signal});
-  document.addEventListener('islandsun-native-submit', event => commit(event.target), {signal:events.signal});
+  document.addEventListener('islandsun-native-submit', event => { if (commit(event.target) === false) event.preventDefault(); }, {signal:events.signal});
   document.addEventListener('islandsun-native-submit-failed', () => active?.transaction.stop('The save could not be confirmed. Check the request list before trying again.'), {signal:events.signal});
   document.addEventListener('invalid', event => { if (event.target.form === active?.form) cancelPrepared(); }, {capture:true,signal:events.signal});
   document.addEventListener('islandsun-confirm-response', event => {
@@ -72,29 +72,32 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
     if (products === null) { notify('Review the product list before using Save & Submit.', {error:true}); return; }
     const pending = {account, ...contract, number, products, sourceUrl:current?.url,
       sampleType:contract.kind === 'sample' ? Number(form.querySelector('[name="srtype"]')?.value || new URL(location.href).searchParams.get('srtype')) : undefined};
-    const transaction = createSaveSubmitFrame({form, pending, onSubmission, onSaved:() => onSaved?.(form),
+    const transaction = createSaveSubmitFrame({form, pending, nativeSave:contract.kind === 'sample', onSubmission, onSaved:() => onSaved?.(form),
       onCommitted() {
         locked.add(form);
         // Leave native successful controls enabled until the browser has collected the form data.
         setTimeout(() => { if (!disposed && save.isConnected && locked.has(form)) save.disabled = true; }, 0);
       },
-      onFinished() { delete form.dataset.isiSaveSubmit; delete form.dataset.isiSaveSubmitAuthorized; syncButtons(); },
+      onFinished() { if (active?.transaction === transaction) active.finished = true; clearTimeout(timer); delete form.dataset.isiSaveSubmit; delete form.dataset.isiSaveSubmitAuthorized; syncButtons(); },
+      onClosed() { if (active?.transaction === transaction && !transaction.committed) cancelPrepared(true); },
     });
-    active = {form, transaction, products, number, authorized:false, reviewed:false}; form.dataset.isiSaveSubmit = 'iframe'; syncButtons();
+    active = {form, transaction, products, number, authorized:false, reviewed:false}; form.dataset.isiSaveSubmit = contract.kind === 'sample' ? 'navigation' : 'iframe'; syncButtons();
     try { await transaction.prepare(); }
     catch {
       if (disposed || active?.transaction !== transaction) return;
-      cancelPrepared(); notify('Automatic submission could not be prepared. Nothing was saved. Try again or use Save.', {error:true}); return;
+      transaction.stop('Automatic submission could not be prepared. Nothing was saved. Try again later or use Save.'); return;
     }
     if (disposed || active?.transaction !== transaction) return;
     if (!canEdit(form) || !form.isConnected || save.disabled) { cancelPrepared(); return; }
     try { save.click(); }
-    catch { cancelPrepared(); notify('Save did not start. Review the form before trying again.', {error:true}); }
-    if (active && !transaction.committed) timer = setTimeout(() => {
-      if (active && !transaction.committed) {
+    catch { transaction.stop('Save did not start. Review the form before trying again.'); return; }
+    if (active && !active.finished && !transaction.committed) timer = setTimeout(() => {
+      if (active && !active.finished && !transaction.committed) {
         const review = active.authorized && document.querySelector('#modal-produk-masuk');
-        diagnosticLog('submission-save-not-started',{number,authorized:active.authorized,reviewed:active.reviewed,reviewPresent:!!review});
-        cancelPrepared(); notify(review ? 'The portal’s product review could not be verified. Nothing was saved or submitted.' : 'Save did not start. Review the form before trying again.', {error:true});
+        diagnosticLog('submission-save-not-started',{number,authorized:active.authorized,reviewed:active.reviewed,reviewPresent:!!review,
+          expectedProducts:active.products,
+          reviewRows:review ? [...review.querySelectorAll('#body-produk-masuk tr')].slice(0,50).map(row => [...row.cells].map(cell => cell.textContent.trim().slice(0,300))) : undefined});
+        transaction.stop(review ? 'The portal’s product review could not be verified. Nothing was saved or submitted.' : 'Save did not start. Review the form before trying again.');
       }
     }, 60000);
   }
@@ -126,11 +129,19 @@ export function createSaveSubmit({ notify, canEdit, account, onSubmission, onSav
     }
     syncButtons();
   }
+  const continuation = readSampleContinuation(account);
+  if (continuation) {
+    const transaction = createSaveSubmitFrame({pending:continuation,onSubmission,
+      onFinished() { if (active?.transaction === transaction) active.finished = true; syncButtons(); },
+    });
+    active = {form:null,transaction,number:continuation.number,authorized:true,reviewed:true};
+    void transaction.resume();
+  }
   return {enhance, destroy() {
     if (disposed) return;
     disposed = true; clearTimeout(timer); events.abort(); observer.disconnect();
     active?.transaction.destroy();
-    if (active) { delete active.form.dataset.isiSaveSubmit; delete active.form.dataset.isiSaveSubmitAuthorized; }
+    if (active?.form) { delete active.form.dataset.isiSaveSubmit; delete active.form.dataset.isiSaveSubmitAuthorized; }
     for (const [save, button] of buttons) { button.remove(); restoreGroup(save); }
     buttons.clear();
   }};

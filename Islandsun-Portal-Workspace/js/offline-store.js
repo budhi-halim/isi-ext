@@ -20,7 +20,8 @@ const complete = transaction => {
 
 export function openArchive() {
   if (!opening) opening = new Promise((resolve, reject) => {
-    const operation = indexedDB.open(DATABASE, 4);
+    let blocked = false;
+    const operation = indexedDB.open(DATABASE, 5);
     operation.onupgradeneeded = event => {
       const database = operation.result;
       if (event.oldVersion < 1) {
@@ -40,6 +41,10 @@ export function openArchive() {
         operation.transaction.objectStore('files').createIndex('hash','hash');
       }
       if (event.oldVersion < 4) records.createIndex('detailKindQueue',['account','kind','detailPriority','sortDate']);
+      if (event.oldVersion < 5) {
+        operation.transaction.objectStore('files').createIndex('account','account');
+        operation.transaction.objectStore('blobs').createIndex('size','size');
+      }
       if (event.oldVersion === 1) {
         const cursor = records.openCursor();
         cursor.onsuccess = () => {
@@ -50,8 +55,9 @@ export function openArchive() {
       }
     };
     operation.onerror = () => { opening = null; reject(operation.error); };
-    operation.onblocked = () => { opening = null; reject(new Error('Close older offline tabs and reopen the archive.')); };
+    operation.onblocked = () => { blocked = true; opening = null; reject(new Error('Close older offline tabs and reopen the archive.')); };
     operation.onsuccess = () => {
+      if (blocked) { operation.result.close(); return; }
       operation.result.onversionchange = () => { operation.result.close(); opening = null; };
       resolve(operation.result);
     };
@@ -362,65 +368,115 @@ export async function recordFileCoverage(key, {includeSources = false} = {}) {
 }
 
 /** Account-specific file references grant access; a digest alone never grants access. */
-async function releaseBlobs(transaction, hashes) {
+async function releaseBlobs(transaction, hashes, onProgress = () => {}) {
+  let completed = 0;
   for (const hash of hashes) {
     if (!await request(transaction.objectStore('files').index('hash').count(hash))) transaction.objectStore('blobs').delete(hash);
+    onProgress({phase:'shared-files',completed:++completed,total:hashes.size});
   }
 }
 
 /** Called only after background writers have stopped; shared bytes survive other owners. */
-export async function clearArchive(account = null) {
+export async function clearArchive(account = null, {onProgress = () => {}} = {}) {
   const database = await openArchive();
   const transaction = database.transaction(['records','files','blobs','meta'],'readwrite');
   const done = complete(transaction);
   if (account === null) {
-    for (const name of ['records','files','blobs','meta']) transaction.objectStore(name).clear();
+    let completed = 0;
+    const names = ['records','files','blobs','meta'];
+    const counts = await Promise.all(names.map(name => request(transaction.objectStore(name).count())));
+    const total = counts.reduce((sum,count) => sum + count,0);
+    onProgress({phase:'records',completed,total});
+    await Promise.all(names.map(async (name,index) => {
+      await request(transaction.objectStore(name).clear()); completed += counts[index];
+      onProgress({phase:'records',completed,total});
+    }));
   } else {
     const hashes = new Set();
-    await Promise.all(['records','files','meta'].map(name => new Promise((resolve,reject) => {
-      const cursor = transaction.objectStore(name).openCursor();
+    const records = transaction.objectStore('records'), files = transaction.objectStore('files'), meta = transaction.objectStore('meta');
+    const range = IDBKeyRange.bound([account,''],[account,'\uffff']);
+    const [recordCount,fileCount,metaKeys] = await Promise.all([
+      request(records.index('accountKind').count(range)), request(files.index('account').count(account)), request(meta.getAllKeys()),
+    ]);
+    const ownedKeys = metaKeys.filter(key => typeof key === 'string' && (key === `account:${account}` || key === `encryption:${account}` || key.startsWith(`index:${account}:`)));
+    const total = recordCount + fileCount + ownedKeys.length;
+    let completed = 0;
+    const advance = () => onProgress({phase:'records',completed:++completed,total});
+    onProgress({phase:'records',completed,total});
+    await Promise.all([
+      ...ownedKeys.map(async key => { await request(meta.delete(key)); advance(); }),
+      ...['records','files'].map(name => new Promise((resolve,reject) => {
+      const store = transaction.objectStore(name);
+      const cursor = name === 'records' ? store.index('accountKind').openKeyCursor(range) : store.index('account').openCursor(IDBKeyRange.only(account));
       cursor.onerror = () => reject(cursor.error);
       cursor.onsuccess = () => {
         const item = cursor.result;
         if (!item) { resolve(); return; }
-        const owned = name === 'meta' ? item.key === `account:${account}` || item.key === `encryption:${account}` || item.key.startsWith(`index:${account}:`) : item.value.account === account;
-        if (owned) { if (name === 'files' && item.value.hash) hashes.add(item.value.hash); item.delete(); }
+        if (name === 'files' && item.value.hash) hashes.add(item.value.hash);
+        const removal = store.delete(item.primaryKey);
+        removal.onsuccess = advance;
         item.continue();
       };
-    })));
-    await releaseBlobs(transaction,hashes);
+    }))]);
+    onProgress({phase:'shared-files',completed:0,total:hashes.size});
+    await releaseBlobs(transaction,hashes,onProgress);
   }
   await done;
+  onProgress({phase:'access',completed:0,total:0});
   await clearVault(account);
 }
 
-export async function archiveUsage(account = null) {
+/** Count both scopes together; the size index avoids reading encrypted file payloads. */
+export async function archiveStorageUsage(account = null) {
   const database = await openArchive();
   const transaction = database.transaction(['records','files','blobs']);
-  const result = {records:0,files:0,bytes:0};
-  const hashes = new Set();
+  const done = complete(transaction);
+  const all = {records:0,files:0,bytes:0}, current = account === null ? null : {records:0,files:0,bytes:0};
+  const hashes = new Set(), currentHashes = new Set();
   const records = transaction.objectStore('records');
-  const count = request(account === null ? records.count()
-    : records.index('accountKind').count(IDBKeyRange.bound([account,''],[account,'\uffff'])));
-  await Promise.all([count.then(value => { result.records = value; }), new Promise((resolve,reject) => {
+  await Promise.all([
+    request(records.count()).then(value => { all.records = value; }),
+    current && request(records.index('accountKind').count(IDBKeyRange.bound([account,''],[account,'\uffff']))).then(value => { current.records = value; }),
+    new Promise((resolve,reject) => {
     const cursor = transaction.objectStore('files').openCursor();
     cursor.onerror = () => reject(cursor.error);
     cursor.onsuccess = () => {
       const item = cursor.result;
       if (!item) { resolve(); return; }
-      if (account === null || item.value.account === account) {
-        if (item.value.purpose !== 'source') result.files++;
-        if (item.value.hash) hashes.add(item.value.hash);
-        else result.bytes += item.value.blob?.size || 0;
+      const file = item.value;
+      if (file.purpose !== 'source') all.files++;
+      if (file.hash) hashes.add(file.hash); else all.bytes += file.blob?.size || 0;
+      if (current && file.account === account) {
+        if (file.purpose !== 'source') current.files++;
+        if (file.hash) currentHashes.add(file.hash); else current.bytes += file.blob?.size || 0;
       }
       item.continue();
     };
   })]);
+  const blobs = transaction.objectStore('blobs');
+  await new Promise((resolve,reject) => {
+    const cursor = blobs.index('size').openKeyCursor();
+    cursor.onerror = () => reject(cursor.error);
+    cursor.onsuccess = () => {
+      const item = cursor.result;
+      if (!item) { resolve(); return; }
+      if (hashes.delete(item.primaryKey)) all.bytes += item.key;
+      if (currentHashes.delete(item.primaryKey)) current.bytes += item.key;
+      item.continue();
+    };
+  });
+  // Only legacy files without a size index entry need their stored value read.
   await Promise.all([...hashes].map(async hash => {
-    const blob = await request(transaction.objectStore('blobs').get(hash));
-    result.bytes += blob?.size || blob?.blob?.size || 0;
+    const value = await request(blobs.get(hash)), size = value?.size ?? value?.blob?.size ?? 0;
+    all.bytes += size; if (currentHashes.has(hash)) current.bytes += size;
   }));
-  return result;
+  await done;
+  return {all,current};
+}
+
+export async function archiveUsage(account = null) {
+  const usage = await archiveStorageUsage(account);
+  return account === null ? usage.all : usage.current;
 }
 
 /** A complete server list revokes only this account's references to absent records. */

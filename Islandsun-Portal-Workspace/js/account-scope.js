@@ -24,12 +24,14 @@ export function startAccountScope({observeAuthentication = async () => {}} = {})
     try { if (new URL(sender.url).origin !== 'http://apps.islandsunindonesia.com:81') return; } catch { return; }
     if (typeof message.account !== 'string' || message.account.length > 200 || typeof message.name !== 'string' || message.name.length > 300
       || !Number.isFinite(message.observedAt) || message.observedAt > Date.now() + 1000) return;
+    let responded = false;
     const result = chain.then(async () => {
       await setAccountScope(message.account, message.name, message.observedAt);
+      respond({ok:true}); responded = true;
       await observeAuthentication(message,sender);
     });
     chain = result.catch(() => {});
-    result.then(() => respond({ok:true}), () => respond({ok:false}));
+    result.catch(() => { if (!responded) respond({ok:false}); });
     return true;
   });
 }

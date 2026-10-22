@@ -56,7 +56,7 @@ html[data-isi-portal="enabled"] { scrollbar-gutter: stable; font-size: 16px; bac
 [data-isi-portal="enabled"] :is(a,.text-primary) { color: var(--isi-primary); }
 [data-isi-portal="enabled"] :is(.text-muted,small.help-block,.help-block) { color: var(--isi-muted); }
 [data-isi-portal="enabled"] :is(.text-danger,.has-error .help-block) { color: var(--isi-error); }
-[data-isi-portal="enabled"] :focus-visible { outline: 3px solid var(--isi-primary) !important; outline-offset: 3px; }
+[data-isi-portal="enabled"] :focus-visible { outline: 2px solid var(--isi-primary) !important; outline-offset: -2px; }
 [data-isi-portal="enabled"] ::selection { background: color-mix(in oklch, var(--isi-primary) 25%, transparent); }
 [data-isi-portal="enabled"] * { scrollbar-color: var(--isi-border) transparent; scrollbar-width: thin; }
 
@@ -328,7 +328,7 @@ html:not([data-isi-boot="off"]) .main-header .user-menu > a { color: var(--isi-t
 [data-isi-portal="enabled"] .isi-toggle-track::after { content: ''; display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--isi-surface); transition: transform 160ms; }
 [data-isi-portal="enabled"] .isi-portal-theme input:checked + .isi-toggle-track { background: var(--isi-primary); }
 [data-isi-portal="enabled"] .isi-portal-theme input:checked + .isi-toggle-track::after { transform: translateX(18px); background: var(--isi-on-primary); }
-[data-isi-portal="enabled"] .isi-portal-theme input:focus-visible + .isi-toggle-track { outline: 3px solid var(--isi-primary); outline-offset: 3px; }
+[data-isi-portal="enabled"] .isi-portal-theme input:focus-visible + .isi-toggle-track { outline: 2px solid var(--isi-primary); outline-offset: 2px; }
 
 /* === Username and password surfaces === */
 [data-isi-portal="enabled"] :is(.lockscreen-wrapper,.login-box) { width: min(440px, calc(100vw - 32px)); max-width: none; margin: 0 !important; padding: 36px !important; background: var(--isi-surface) !important; color: var(--isi-text) !important; border: 1px solid var(--isi-border); border-radius: var(--isi-radius); box-shadow: var(--isi-shadow); }
@@ -513,9 +513,9 @@ html:not([data-isi-boot="off"]) .main-header .user-menu > a { color: var(--isi-t
 [data-isi-portal="enabled"] .user-menu > .dropdown-menu { display: block; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-6px); transition: opacity 180ms ease, transform 180ms ease, visibility 180ms; }
 [data-isi-portal="enabled"] .user-menu.open > .dropdown-menu { opacity: 1; visibility: visible; pointer-events: auto; transform: none; }
 [data-isi-portal="enabled"] .isi-notification-center { position: fixed; z-index: 2000; margin: 0; inset: auto; width: min(440px,calc(100vw - 16px)); padding: 0; overflow: auto; border-radius: 16px; }
-[data-isi-portal="enabled"] .isi-notification-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 14px 16px; background: var(--isi-surface); border-bottom: 1px solid var(--isi-border); }
+[data-isi-portal="enabled"] .isi-notification-header { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 16px; background: var(--isi-surface); border-bottom: 1px solid var(--isi-border); }
 [data-isi-portal="enabled"] .isi-notification-header h2 { flex: 1; margin: 0; font-size: 15px; }
-[data-isi-portal="enabled"] .isi-notification-header [data-clear-notices] { min-height: 32px; padding: 5px 9px; font-size: 12px; }
+[data-isi-portal="enabled"] .isi-notification-header :is([data-clear-notices], [data-silence-notices]) { min-height: 32px; padding: 5px 9px; font-size: 12px; }
 [data-isi-portal="enabled"] [data-notice-list] { padding: 8px; }
 [data-isi-portal="enabled"] .isi-notification-entry { --notice-color: var(--isi-success); position: relative; isolation: isolate; display: flex; align-items: start; gap: 10px; padding: 12px; margin-bottom: 6px; border: 1px solid color-mix(in oklch,var(--notice-color) 24%,var(--isi-border)); border-radius: 10px; background: color-mix(in oklch,var(--notice-color) 6%,var(--isi-surface)); font-size: 13px; }
 [data-isi-portal="enabled"] .isi-notification-entry[data-tone="warning"] { --notice-color: var(--isi-warning); }

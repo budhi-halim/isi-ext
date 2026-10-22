@@ -36,10 +36,12 @@ import { ACCOUNT_SCOPE } from './account-scope.js';
 import { createTextareaLimits } from './textarea-limits.js';
 import { createModalAccessibility } from './modal-accessibility.js';
 import { createActivityConsole } from './activity-console.js';
+import { diagnosticLog } from './diagnostic-log.js';
+import { createArchiveStatusNotices } from './archive-status-notices.js';
 
 // Load the module graph during parsing; DOM work still waits for the native page.
 if (document.documentElement.dataset.isiDomReady === 'pending' || document.readyState === 'loading') await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
-let teardown, generation = 0;
+let teardown, generation = 0, accountReady = Promise.resolve();
 async function start() {
   if (location.origin !== PORTAL_ORIGIN || teardown) return;
   const current = ++generation;
@@ -53,6 +55,11 @@ async function start() {
   const journal = createPresentationJournal();
   const dropdownTranslation = createDropdownTranslation(journal);
   const theme = addThemeControl();
+  journal.capture(() => { refineShell(); translateInterface(); });
+  const shellReady = performance.now();
+  await accountReady;
+  if (current !== generation) { dropdownTranslation.destroy(); theme?.destroy(); journal.restore(); activity.destroy(); return; }
+  diagnosticLog('portal-startup', {moduleReadyMs:shellReady,accountWaitMs:performance.now()-shellReady});
   const notices = createNotifications();
   const dialogs = createPortalDialogs();
   const validation = createFormValidation(dialogs);
@@ -74,7 +81,7 @@ async function start() {
   const operationalForms = createOperationalForms();
   const tirForm = createTirForm();
   const calendar = createCalendarPresentation();
-  let store, center, monitor, combinedStore, submissions, saves;
+  let store, center, monitor, combinedStore, submissions, saves, archiveFeedback;
   let accountPaused = false;
   function checkAccount(scope) {
     if (!account || !scope || scope.account === account || accountPaused) return;
@@ -82,21 +89,19 @@ async function start() {
     saveSubmit.destroy();
     improvementPrefill.destroy();
     observedTable.destroy();
-    monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy();
+    monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy(); archiveFeedback?.destroy();
     products.destroy(); repository.destroy(); setOfflineAccount(null);
     notices.notify('The signed-in account changed. Reload this page before continuing.',{key:'account-changed',tone:'warning'});
   }
   const accountChanged = (changes,area) => { if (area === 'local' && changes[ACCOUNT_SCOPE]) checkAccount(changes[ACCOUNT_SCOPE].newValue); };
   if (account && document.querySelector('.content-wrapper')) {
     chrome.runtime.sendMessage({type:'portal-session-active'}).catch(()=>{});
-    store = createNotificationStore(account, { onError: (error,operation) => notices.notify(operation === 'display'
-      ? 'Notifications could not be displayed. Reopen the notification tray or reload the page. Your portal requests are unaffected.'
-      : error.name === 'QuotaExceededError'
-      ? 'This browser’s notification storage is full. Reminder history could not be saved. Your portal requests are unaffected.'
-      : 'Reminder history could not be updated in this browser. The extension will retry; your portal requests are unaffected.', { key:'notification-history-error', error: true }) });
-    submissions = createSubmissionTracking(store, () => notices.notify('This submission could not be tracked for notifications. Check its status in the request list.', { error: true }));
-    saves = createSavedRequestTracking(store, () => notices.notify('The reminder for this save could not be recorded. Check its status in the request list.', {error:true}));
-    combinedStore = withUpdateNotifications(store);
+    store = createNotificationStore(account);
+    archiveFeedback = createArchiveStatusNotices(account, notices);
+    const trackingFailure = operation => error => diagnosticLog('notification-tracking-failed', { operation, errorType:error.name, message:String(error.message).slice(0,500) });
+    submissions = createSubmissionTracking(store, trackingFailure('submission'));
+    saves = createSavedRequestTracking(store, trackingFailure('save'));
+    combinedStore = withUpdateNotifications(store, {onError:trackingFailure('updates')});
     center = createNotificationCenter(combinedStore, notices);
     const accountName = document.querySelector('.user-menu > a')?.textContent.trim().replace(/\s+/g, ' ');
     monitor = createNotificationMonitor(store, repository, notices, accountName);
@@ -130,7 +135,7 @@ async function start() {
     chrome.storage.onChanged.removeListener(accountChanged);
     document.removeEventListener('islandsun-table-draw', enhance);
     clearTimeout(timer); observer.disconnect(); dropdownTranslation.destroy(); theme?.destroy({ preserveScheme: preservePresentation });
-    monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy();
+    monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy(); archiveFeedback?.destroy();
     improvementPrefill.destroy(); saveSubmit.destroy(preservePresentation); validation.destroy(); unsavedChanges.destroy(); editMode.destroy(); dialogs.destroy();
     modalAccessibility.destroy(); textareaLimits.destroy(); documents.destroy(); products.destroy(); navigation.destroy(); notices.destroy(); calendar.destroy(); cancelMotion(); releaseTableControls(); operationalForms.destroy(); tirForm.destroy(); journal.restore(); sampleForms.destroy(); teardown = null;
     document.querySelector('#isi-portal-theme')?.closest('[data-isi-owned]')?.remove();
@@ -163,4 +168,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.enabled.newValue === false) { teardown?.(); delete document.documentElement.dataset.isiPortal; document.documentElement.classList.remove('isi-theme'); document.documentElement.dataset.isiBoot = 'off'; }
   else start().catch(startupFailed);
 });
-await start().catch(startupFailed);
+export function initializePortal(ready = Promise.resolve()) {
+  accountReady = ready;
+  return start().catch(startupFailed);
+}

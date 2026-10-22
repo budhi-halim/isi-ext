@@ -15,7 +15,7 @@ export async function checkTirDocuments(record, previous, signal, onProgress = a
     const response = await readPortalText(document.url,{signal,purpose:'notification',reason:'documents',binary:true,requestNumber:record.number});
     const result = await chrome.runtime.sendMessage({type:'tir-document-bytes',startedAt,account:record.account,record:{id:record.id,url:record.url,number:record.number},document:{id:document.id,url:document.url,label:document.label},...response});
     signal.throwIfAborted();
-    if (!result?.ok) throw new Error('The document could not be verified. It will be checked again.');
+    if (!result?.ok) throw Object.assign(new Error('The document could not be verified. It will be checked again.'), {code:result?.code || 'DOCUMENT_SERVICE_UNAVAILABLE'});
     documents[document.id] = observeDocumentBytes(document,result.hash);
     await onProgress(snapshot());
     diagnosticLog('document-version',{record:record.number,url:document.url,changed:documents[document.id].changed,hash:result.hash,archiveSaved:result.saved});

@@ -5,7 +5,7 @@
 .isi-ui .setting .isi-toggle-track::after { content: ''; display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--isi-surface); transition: transform 160ms; }
 .isi-ui .setting input:checked + .isi-toggle-track { background: var(--isi-primary); }
 .isi-ui .setting input:checked + .isi-toggle-track::after { transform: translateX(18px); background: var(--isi-on-primary); }
-.isi-ui .setting input:focus-visible + .isi-toggle-track { outline: 3px solid var(--isi-primary); outline-offset: 3px; }
+.isi-ui .setting input:focus-visible + .isi-toggle-track { outline: 2px solid var(--isi-primary); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .isi-ui .setting .isi-toggle-track::after { transition: none; } }
 .isi-ui .setting select { width: auto; }
 #message:empty { display: none; }
@@ -16,6 +16,7 @@
 #diagnostics-status:empty { display: none; }
 #advanced-settings > button { margin-block: 8px; width: 100%; }
 #archive-settings-message:empty { display: none; }
+#archive-delete-progress { width: 100%; height: 8px; accent-color: var(--isi-primary); }
 #archive-delete-dialog { box-sizing: border-box; width: calc(100% - 24px); max-height: calc(100dvh - 24px); overflow: auto; padding: 20px; border: 1px solid var(--isi-border); border-radius: var(--isi-radius); background: var(--isi-surface); color: var(--isi-text); }
 #archive-delete-dialog::backdrop { background: oklch(10% 0.02 255 / .65); backdrop-filter: blur(4px); }
 #archive-delete-dialog h2 { margin-block-start: 0; }

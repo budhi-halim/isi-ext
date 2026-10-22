@@ -7,7 +7,12 @@ export function withUpdateNotifications(store, { onError = () => {} } = {}) {
   const owner = [...crypto.getRandomValues(new Uint32Array(4))].join('-');
   const isUpdate = id => id.startsWith('extension-update:');
   const read = () => { const state = store.read(); return { ...state, notices: { ...state.notices, ...updates } }; };
-  const publish = () => { if (!disposed) for (const listener of listeners) listener(read()); };
+  const publish = () => {
+    if (disposed) return;
+    let state;
+    try { state = read(); } catch (error) { onError(error); return; }
+    for (const listener of listeners) { try { listener(state); } catch (error) { onError(error); } }
+  };
   function accept(state) {
     if (disposed) return;
     updates = Object.fromEntries(Object.entries(state?.notices || {}).filter(([id, item]) => isUpdate(id) && item.type === 'update' && item.url === UPDATE_PAGE));
@@ -30,7 +35,11 @@ export function withUpdateNotifications(store, { onError = () => {} } = {}) {
   return {
     read,
     dismiss: (id, mute) => isUpdate(id) ? send('dismiss', id) : store.dismiss(id, mute),
-    clear: async () => { await store.clear(); await send('clear'); },
+    silence: ids => store.silence(ids.filter(id => !isUpdate(id))),
+    clear: async (ids = Object.keys(read().notices)) => {
+      await store.clear(ids.filter(id => !isUpdate(id)));
+      for (const id of ids.filter(isUpdate)) await send('dismiss', id);
+    },
     reset: async () => { await store.reset(); await send('reset'); },
     claim: async id => isUpdate(id) ? (await send('claim', id)).claimed : store.claim(id),
     delivered: id => isUpdate(id) ? send('delivered', id) : store.delivered(id),

@@ -35,6 +35,15 @@ export function sameSampleProducts(expected, actual) {
   return JSON.stringify(sorted(expected)) === JSON.stringify(sorted(actual));
 }
 
+/** The native preview may omit the unit; the saved product comparison still requires it. */
+function reviewQuantityMatches(expected, actual) {
+  if (expected === actual) return true;
+  const quantity = /^(\d+(?:\.\d+)?) x (\d+(?:\.\d+)?)(?: ([a-z]+))?$/;
+  const before = quantity.exec(expected), after = quantity.exec(actual);
+  return Boolean(before && after && !after[3]
+    && Number(before[1]) === Number(after[1]) && Number(before[2]) === Number(after[2]));
+}
+
 /** Native product review omits descriptions; the saved detail must still verify them in full. */
 export function sampleReviewMatches(expected, root) {
   if (!expected?.length) return false;
@@ -49,5 +58,17 @@ export function sampleReviewMatches(expected, root) {
     const value = normalize(row.cells[index].textContent);
     return column >= 2 && /^\d+(?:\.\d+)?$/.test(value) ? String(Number(value)) : value;
   }));
-  return sameSampleProducts(expected.map(row => used.map(({column}) => row[column])),values);
+  if (expected.length !== values.length) return false;
+  const remaining = [...values];
+  // Match explicit units before unitless previews so duplicate codes cannot hide a wrong unit.
+  const ordered = [...expected].sort((a,b) => a[1].localeCompare(b[1]));
+  for (const row of ordered) {
+    const matches = value => used.every(({column},index) => column === 1
+      ? reviewQuantityMatches(row[column],value[index]) : row[column] === value[index]);
+    let index = remaining.findIndex(value => matches(value) && value[used.findIndex(item => item.column === 1)] === row[1]);
+    if (index < 0) index = remaining.findIndex(matches);
+    if (index < 0) return false;
+    remaining.splice(index,1);
+  }
+  return true;
 }

@@ -28,7 +28,7 @@ if (location.origin === 'http://apps.islandsunindonesia.com:81') {
     const scheme = sessionStorage.getItem('islandsun.portal.theme');
     root.dataset.theme = ['light', 'dark'].includes(scheme) ? scheme : 'system';
   } catch { root.dataset.theme = 'system'; }
-  root.dataset.isiDomReady = document.readyState === 'complete' ? 'ready' : 'pending';
+  root.dataset.isiDomReady = document.readyState === 'loading' ? 'pending' : 'ready';
   document.addEventListener('DOMContentLoaded', () => { root.dataset.isiDomReady = 'ready'; }, { once: true });
   root.dataset.isiBoot = 'pending'; root.classList.add('isi-theme');
   function showStartupFailure() {
@@ -36,17 +36,21 @@ if (location.origin === 'http://apps.islandsunindonesia.com:81') {
     if (root.dataset.isiBoot === 'ready' || root.dataset.isiBoot === 'off' || document.querySelector('#isi-portal-startup')) return;
     const notice = document.createElement('section'); notice.id = 'isi-portal-startup'; notice.setAttribute('role', 'status');
     notice.dataset.isiOwned = '';
-    const message = document.createElement('p'); message.textContent = 'Portal enhancements are taking longer to load. You can continue using the page.';
+    const message = document.createElement('p'); message.textContent = root.dataset.isiBoot === 'failed'
+      ? 'The portal layout could not finish loading. Reload the page to try again.' : 'The portal layout is still loading.';
     const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = 'Reload page'; retry.addEventListener('click', () => location.reload());
     const dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.textContent = 'Dismiss'; dismiss.addEventListener('click', () => notice.remove());
     notice.append(message, retry, dismiss); document.body.append(notice);
   }
-  const fallback = setTimeout(showStartupFailure, 4000);
+  let fallback;
+  const waitForLayout = () => { fallback = setTimeout(showStartupFailure, 15000); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', waitForLayout, {once:true});
+  else waitForLayout();
   document.addEventListener('islandsun-startup-failed', showStartupFailure);
   chrome.storage.local.get({ enabled: true }).then(async ({ enabled }) => {
     if (!enabled) { root.dataset.isiBoot = 'off'; root.classList.remove('isi-theme'); clearTimeout(fallback); }
     else { root.dataset.isiPortal = 'enabled'; }
-    await accountReady;
-    await import(chrome.runtime.getURL('js/ui.js'));
+    const ui = await import(chrome.runtime.getURL('js/ui.js'));
+    await ui.initializePortal(accountReady);
   }).catch(showStartupFailure).finally(() => { clearTimeout(fallback); if (root.dataset.isiBoot === 'ready' || root.dataset.isiBoot === 'off') document.querySelector('#isi-portal-startup')?.remove(); });
 } else document.documentElement.dataset.isiBoot = 'off';

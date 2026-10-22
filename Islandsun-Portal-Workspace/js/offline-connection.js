@@ -9,7 +9,10 @@ export function archiveFailure(error, checkingConnection) {
   const sourceFailure = error.code === 'ARCHIVE_DATA'
     || ['QuotaExceededError', 'UnknownError', 'InvalidStateError'].includes(error.name)
     || /storage|archive/i.test(error.message);
-  if (sourceFailure) return { state: 'attention', error: error.message };
+  if (error.name === 'QuotaExceededError' || /storage is full/i.test(error.message)) return {state:'attention',actionNeeded:'free-storage',error:'Browser storage is full. Free some space to continue saving the offline copy.'};
+  if (sourceFailure) return {state:'attention',actionNeeded:'',error:error.code === 'ARCHIVE_DATA'
+    ? 'Some records could not be saved. Saving will retry automatically.'
+    : 'Browser storage is temporarily unavailable. Saving will retry automatically.'};
   if (!checkingConnection) return {
     state: 'attention',
     error: 'A background request did not finish. Saving will retry after a pause; the previous copy is retained.',
@@ -19,7 +22,7 @@ export function archiveFailure(error, checkingConnection) {
 
 /** An outage remains authoritative until a subsequent connection probe succeeds. */
 export function connectionUpdate(saved, values, verified, now = Date.now()) {
-  const next = {...saved,...values};
+  const next = {...saved,...values,...(values.state ? {actionNeeded:values.actionNeeded || ''} : {})};
   if (values.state === 'offline') return {...next,hadOutage:true,recoveredAt:0,connectedAt:0};
   if (verified) return {...next,hadOutage:false,connectedAt:now,recoveredAt:saved.hadOutage ? now : saved.recoveredAt || 0};
   if (saved.hadOutage && values.state && values.state !== 'paused') {
