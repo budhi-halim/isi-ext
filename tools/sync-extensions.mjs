@@ -7,7 +7,7 @@ const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const family = path.resolve(root, '../isi/family');
 const check = process.argv.includes('--check');
 const targets = ['Islandsun-Portal-Workspace', 'Islandsun-Revenue', 'IslandSun-AutoFeedback'];
-const familyFiles = ['css/tokens.css', 'css/components.css', 'css/notifications.css', 'css/theme-control.css', 'css/extension-popup.css', 'css/row-hover.css', 'js/row-hover.js', 'js/theme.js', 'js/theme-control.js', 'js/notifications.js', 'js/toast-card.js', 'js/notice-motion.js', 'assets/icons/family.svg'];
+const familyFiles = ['css/tokens.css', 'css/components.css', 'css/notifications.css', 'css/theme-control.css', 'css/extension-popup.css', 'css/row-hover.css', 'js/row-hover.js', 'js/theme.js', 'js/theme-control.js', 'js/notifications.js', 'js/toast-card.js', 'js/toast-motion.js', 'js/notice-motion.js', 'assets/icons/family.svg'];
 const files = new Map();
 for (const name of await readdir(path.join(root, 'shared'))) if (name.endsWith('.js')) files.set(`js/shared/${name}`, await readFile(path.join(root, 'shared', name)));
 for (const name of familyFiles) files.set(`assets/family/${name}`, await readFile(path.join(family, name)));

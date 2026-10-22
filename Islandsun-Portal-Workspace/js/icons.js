@@ -1,4 +1,7 @@
+import { translateChrome } from './logic.js';
+
 const paths = {
+  error: 'm9 9 6 6m0-6-6 6M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',
   list: 'M9 6h12M9 12h12M9 18h12M3 6h.01M3 12h.01M3 18h.01',
   lock: 'M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5V10Zm7 4v3',
   logout: 'M9 4H4v16h5M9 12h12m-4-4 4 4-4 4',
@@ -40,6 +43,6 @@ export function labelSaveAction(button, text) {
   const mark = icon('document');
   mark.dataset.isiSaveIcon = '';
   const label = document.createElement('span');
-  label.textContent = text;
+  label.textContent = translateChrome(text);
   button.replaceChildren(mark, label);
 }

@@ -1,4 +1,4 @@
-import {portalPath} from './save-submit-logic.js';
+import {portalPath} from './save-contract.js';
 import {createImprovementLoading} from './improvement-loading.js';
 
 const handledDocuments = new WeakSet();

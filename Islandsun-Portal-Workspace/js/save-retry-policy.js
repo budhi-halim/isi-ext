@@ -1,5 +1,0 @@
-export const SAVE_RESPONSE_WAIT_MS = 120000;
-export const SAVE_PROGRESS_NOTICE_MS = 20000;
-export const SAVE_VERIFICATION_WAIT_MS = 120000;
-export const SAVE_VERIFICATION_ATTEMPTS = 3;
-export const SAVE_RETRY_DELAYS_MS = Object.freeze([10000, 20000]);

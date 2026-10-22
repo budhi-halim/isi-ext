@@ -32,16 +32,25 @@ export function withUpdateNotifications(store, { onError = () => {} } = {}) {
   chrome.storage.onChanged.addListener(observedChange);
   void chrome.storage.local.get(UPDATE_KEY).then(value => { if (!observed) accept(value[UPDATE_KEY]); }).catch(onError).finally(() => chrome.storage.onChanged.removeListener(observedChange));
   void send('status').catch(onError);
+  async function bypassPopups(ids) {
+    await store.bypassPopups(ids.filter(id => !isUpdate(id)));
+    for (const id of ids.filter(isUpdate)) await send('bypass', id);
+  }
   return {
     read,
+    retainPopup: request => store.retainPopup(request),
+    bypassPopups,
+    setToastPopups: async enabled => {
+      if (!enabled || read().toastPopups === false) await bypassPopups(Object.keys(read().notices));
+      await store.setToastPopups(enabled);
+    },
     dismiss: (id, mute) => isUpdate(id) ? send('dismiss', id) : store.dismiss(id, mute),
     silence: ids => store.silence(ids.filter(id => !isUpdate(id))),
     clear: async (ids = Object.keys(read().notices)) => {
       await store.clear(ids.filter(id => !isUpdate(id)));
       for (const id of ids.filter(isUpdate)) await send('dismiss', id);
     },
-    reset: async () => { await store.reset(); await send('reset'); },
-    claim: async id => isUpdate(id) ? (await send('claim', id)).claimed : store.claim(id),
+    claim: async id => read().toastPopups === false ? false : isUpdate(id) ? (await send('claim', id)).claimed : store.claim(id),
     delivered: id => isUpdate(id) ? send('delivered', id) : store.delivered(id),
     release: id => isUpdate(id) ? send('release', id) : store.release(id),
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },

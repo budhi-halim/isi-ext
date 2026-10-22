@@ -1,44 +1,20 @@
 import { ACCOUNT_SCOPE } from './account-scope.js';
-import { readAccountSettings } from './account-settings.js';
-import { resumeOfflineSession } from './offline-session.js';
-import { beginCapture, captureStatus, appendCapture, stopCapture } from './debug-capture-store.js';
 import { safeRequestUrl, safeRequestBody, captureResponseBody, responseHeaders, capturedText, CAPTURE_LIMITS } from './debug-capture-data.js';
 import { appendJournal, diagnosticFields } from './diagnostic-journal-store.js';
 
-const POINTER='islandsun.debug-capture-active';
 const PORTAL='http://apps.islandsunindonesia.com:81';
 
 /** Passive instrumentation: capture only requests the application already decided to make. */
 export function startDebugCapture() {
-  let active=null,closing=false;
-  const pending=new Set();
-  const clientRequests=new Map();
-  const ready=chrome.storage.session.get(POINTER).then(saved=>{active=saved[POINTER] || null;});
+  const clientRequests = new Map();
   let journalFailure = false;
   function track(operation) {
-    pending.add(operation);
-    operation.then(() => pending.delete(operation), () => pending.delete(operation));
+    void operation.catch(() => {});
     return operation;
   }
   async function captureContext() {
-    const manual = await current();
-    if (manual) return manual;
     const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
-    return { id: `automatic:${scope?.account || ''}`, account: scope?.account || '', automatic: true, expiresAt: Date.now() + 86400000 };
-  }
-  async function current() {
-    await ready;
-    if(!active || closing)return null;
-    const candidate=active;
-    const scope=(await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
-    const settings=await readAccountSettings();
-    if(scope?.account!==candidate.account || !settings.enabled){
-      await stopCapture(candidate.account,'account-or-enable-changed').catch(()=>{});
-      if(active?.id===candidate.id){active=null;await chrome.storage.session.remove(POINTER);}return null;
-    }
-    const value=await captureStatus(candidate.account);
-    if(!value?.active || value.id!==candidate.id){if(active?.id===candidate.id){active=null;await chrome.storage.session.remove(POINTER);}return null;}
-    return value;
+    return {id:`automatic:${scope?.account || ''}`,account:scope?.account || '',expiresAt:Date.now()+86400000};
   }
   async function note(event,fields={},session=null) {
     const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
@@ -50,15 +26,6 @@ export function startDebugCapture() {
     } catch (error) {
       journalFailure = true;
       await chrome.storage.local.set({'islandsun.journal-error':{at:Date.now(),name:error.name,message:'Diagnostic history could not be saved.'}}).catch(()=>{});
-    }
-    try {
-      const value=session || await current(); if(!value)return;
-      if (value.automatic) return;
-      if(scope?.account!==value.account)return;
-      await appendCapture(value.account,value.id,{at:Date.now(),event,...fields});
-    } catch {
-      // Retain an explicit terminal state without changing the portal operation.
-      if(active)await stopCapture(active.account,'capture-storage-error').catch(()=>{});
     }
   }
   async function read(url,options,context={}) {
@@ -87,9 +54,6 @@ export function startDebugCapture() {
     }));
     return response;
   }
-  chrome.storage.onChanged.addListener((changes,area)=>{
-    if(area==='local' && (changes[ACCOUNT_SCOPE] || changes.enabled)) current().catch(()=>{});
-  });
   chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     if (message?.type === 'diagnostic-event') {
       const ownPage = sender.id === chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL('')) || sender.url?.startsWith(`${PORTAL}/islandsun/`));
@@ -112,7 +76,7 @@ export function startDebugCapture() {
           if (clientRequests.size>=64 || !validUrl(message.request?.url) || !/^(?:sample|tir|portal)-(?:index|detail|products|source|read)$/.test(message.kind)) return {};
           const attemptId=crypto.randomUUID();
           clientRequests.set(attemptId,{...context,documentId:sender.documentId,sessionId:session.id,kind:message.kind,expiresAt:Date.now()+120000});
-          const request={url:safeRequestUrl(message.request.url),method:message.request.method==='POST'?'POST':'GET',body:safeRequestBody(message.request.body),credentials:'include',redirect:'manual',timeoutMs:message.request.timeoutMs === 60000 ? 60000 : 25000};
+          const request={url:safeRequestUrl(message.request.url),method:message.request.method==='POST'?'POST':'GET',body:safeRequestBody(message.request.body),credentials:'include',redirect:'manual',timeoutMs:[25000,60000,120000].includes(message.request.timeoutMs) ? message.request.timeoutMs : 25000};
           await note('request-start',{...context,attemptId,kind:message.kind,request},session);
           return {attemptId,expiresAt:session.expiresAt};
         }
@@ -154,30 +118,6 @@ export function startDebugCapture() {
       })().then(respond,()=>respond({}));
       return true;
     }
-    if(!['debug-capture-start','debug-capture-stop'].includes(message?.type))return;
-    if(sender.id!==chrome.runtime.id || sender.url?.split('?')[0]!==chrome.runtime.getURL('offline.html'))return;
-    (async()=>{
-      await ready;
-      const identity=await resumeOfflineSession(),settings=await readAccountSettings();
-      if(!identity || identity.account!==message.account)throw new Error('Unlock this account’s offline copy to manage its diagnostic capture.');
-      if(message.type==='debug-capture-start'){
-        if(settings.account!==identity.account || !settings.enabled)throw new Error('Sign in to the online portal with this account and enable Portal Workspace before starting capture.');
-        if(closing)throw new Error('The previous capture is finishing its current response.');
-        active=await beginCapture(identity.account,chrome.runtime.getManifest().version);
-        await chrome.storage.session.set({[POINTER]:{account:active.account,id:active.id}});
-        await note('capture-start',{version:active.version,settings:{offlineArchive:settings.offlineArchive,offlineDocuments:settings.offlineDocuments,keepSessionAlive:settings.keepSessionAlive}});
-      } else {
-        if(active?.account!==identity.account){await stopCapture(identity.account);return {ok:true};}
-        if(clientRequests.size) await note('capture-client-inflight',{attemptIds:[...clientRequests.keys()],note:'Content responses may still be running or their page may have navigated away.'});
-        closing=true;
-        try {
-          while (pending.size) await Promise.allSettled([...pending]);
-          await stopCapture(identity.account);active=null;await chrome.storage.session.remove(POINTER);
-        } finally {closing=false;}
-      }
-      return {ok:true};
-    })().then(respond,error=>respond({ok:false,error:error.message}));
-    return true;
   });
   note('worker-start',{version:chrome.runtime.getManifest().version}).catch(()=>{});
   return {note,recording:()=>true,fetch(url,options,context){

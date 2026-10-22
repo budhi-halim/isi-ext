@@ -10,9 +10,6 @@ import { createOfflineAuthentication } from './offline-auth-ui.js';
 import { OFFLINE_PASSWORD_REQUIRED } from './offline-access-policy.js';
 import { calendarMonth, AVAILABILITY_CATEGORIES } from './offline-calendar.js';
 import { createOfflineCalendar } from './offline-calendar-ui.js';
-import { createArchiveReport } from './offline-report-ui.js';
-import { createDebugCaptureUI } from './debug-capture-ui.js';
-import { createSourceExport } from './offline-source-export-ui.js';
 import { archiveWaitMessage } from './offline-wait.js';
 import { replaySavedDetail } from './offline-detail-replay.js';
 import { readConfirmationSheet } from './offline-confirmation-source.js';
@@ -47,16 +44,6 @@ const density = createOfflineTableDensity({region:$('.offline-table-scroll'),sel
 const navigation = createOfflineNavigation($('#sections'),$('#stock-card-views'));
 let accountScope;
 let offlineIdentity;
-const archiveReport = createArchiveReport({
-  getAccount:() => account,
-  getConnection:() => connection.account === account ? connection.state || 'unknown' : 'signed-out',
-  getActivity:() => connection.account === account ? {
-    attemptedAt:connection.attemptedAt,syncedAt:connection.syncedAt,stateChangedAt:connection.stateChangedAt,
-    wait:connection.wait,pacing:connection.pacing,
-  } : {},
-});
-const debugCaptureUI = createDebugCaptureUI({getAccount:() => account});
-const sourceExport = createSourceExport({getAccount:() => account});
 let calendarActive = false, month = calendarMonth('');
 $('#availability-category').append(...Object.entries(AVAILABILITY_CATEGORIES).map(([value,label]) => new Option(label,value)));
 const calendar = createOfflineCalendar($('#availability-calendar'),{
@@ -406,13 +393,9 @@ chrome.storage.onChanged.addListener((changes,area) => {
 const authentication = createOfflineAuthentication({
   onUnlock(identity) {
     offlineIdentity = identity; account = identity.account; revision++;
-    debugCaptureUI.refresh();
     renderConnection(connection); restore();
   },
   onLock({preserveLocation = false} = {}) {
-    debugCaptureUI.clear();
-    archiveReport.clear();
-    sourceExport.clear();
     navigationRevision++;
     if (account && !preserveLocation) {
       const parameters = new URLSearchParams(location.search);
@@ -430,9 +413,6 @@ const authentication = createOfflineAuthentication({
 });
 window.addEventListener('pagehide',event => {
   products.dismiss();
-  debugCaptureUI.clear();
-  archiveReport.clear();
-  sourceExport.clear();
   document.body.dataset.access = 'checking'; $('#offline-sign-in').hidden = true;
   clearTimeout(timer);
   calendar.clear();

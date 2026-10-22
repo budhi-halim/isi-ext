@@ -1,6 +1,6 @@
 // === Capture boundaries ===
 
-export const CAPTURE_LIMITS = Object.freeze({durationMs:15*60000, events:10000, bytes:64*1024*1024, responseBytes:8*1024*1024});
+export const CAPTURE_LIMITS = Object.freeze({responseBytes:8*1024*1024});
 const SECRET = /password|passwd|pwd|token|secret|authorization|cookie|sessionid|phpsessid|csrf/i;
 const PASSWORD_INPUT = /<input\b[^>]*\btype\s*=\s*["']?password\b/i;
 

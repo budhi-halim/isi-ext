@@ -8,9 +8,14 @@ import { submissionRecord } from './submission-logic.js';
 import { silenceDescription } from './notification-types.js';
 import { createNotificationActions } from './notification-actions.js';
 import { diagnosticLog } from './diagnostic-log.js';
+import { notificationText } from './notification-text.js';
 
 function destination(item) {
   if (item.type === 'update' && item.url === UPDATE_PAGE) return UPDATE_PAGE;
+  if (item.type === 'system' && item.url) {
+    try { const url = new URL(item.url); if (url.origin === location.origin && ['http:','https:'].includes(url.protocol)) return url.href; }
+    catch { /* A stored message with no valid local destination stays plain text. */ }
+  }
   const [kind,id] = String(item.key || '').split(':');
   return submissionRecord({kind,id,number:item.number || 'Notification',url:item.url})?.url;
 }
@@ -22,13 +27,10 @@ function orderedNotices(state) {
 export function createNotificationCenter(store, notices) {
   const target = document.querySelector('.navbar-custom-menu');
   if (!target) return { destroy() {} };
-  const scheduled = new Set(), shown = new Set();
+  const scheduled = new Set(), shown = new Set(), suppressed = new Set();
   const listMotion = createNoticeMotion();
   const clearMotion = createTrayClearMotion();
-  const departures = new Map();
-  function cancelDeparture(row) { clearTimeout(departures.get(row)); departures.delete(row); delete row.dataset.noticeQueued; }
-  function clearDepartures() { for (const row of departures.keys()) cancelDeparture(row); }
-  let dialog, confirmation, disposed = false, rendered = '', restoreFocus = true;
+  let dialog, confirmation, pendingState, popupOverride, bypassing = false, disposed = false, rendered = '', restoreFocus = true;
   const button = iconButton('bell', 'Notifications', open);
   button.dataset.isiOwned = ''; button.classList.add('isi-notification-bell');
   button.setAttribute('aria-haspopup', 'dialog'); button.setAttribute('aria-expanded', 'false');
@@ -48,18 +50,56 @@ export function createNotificationCenter(store, notices) {
       if (!busy) { try { sync(store.read()); } catch (error) { reportError(error); } }
       renderBusy();
     },
-    onError: (message, action) => notices.notify(message, {key:`notification-action-${action}`,error:true}),
+    onError: (message, action) => {
+      if (action === 'popups' && dialog) {
+        const error = dialog.querySelector('[data-popup-error]');
+        error.hidden = false; error.textContent = message;
+      } else notices.notify(message, {key:`notification-action-${action}`,error:true});
+    },
   });
   function renderBusy() {
     const busy = mutations.busy;
     for (const control of document.querySelectorAll('.isi-notification-entry button,.isi-portal-toast .isi-toast-button')) control.disabled = busy;
     if (dialog) {
+      dialog.querySelector('[data-toast-popups]').disabled = busy;
       dialog.querySelector('[data-clear-notices]').disabled = busy || !dialog.querySelector('[data-notice-id]:not([data-notice-leaving]):not([data-notice-queued])');
       dialog.querySelector('[data-silence-notices]').disabled = busy || !dialog.querySelector('[data-notice-id]:not([data-notice-leaving]):not([data-notice-queued]) [aria-label="Silence this notification type"]');
-      const reset = dialog.querySelector('[data-reset-notices]');
-      if (reset) reset.disabled = busy;
     }
     for (const control of confirmation?.querySelectorAll('button') || []) control.disabled = busy;
+  }
+  function renderPopupSetting(enabled) {
+    const control = dialog?.querySelector('[data-toast-popups]');
+    if (!control || control.getAttribute('aria-checked') === String(enabled)) return;
+    control.setAttribute('aria-checked', String(enabled));
+    const text = document.createElement('span'); text.textContent = enabled ? 'Popups on' : 'Popups off';
+    control.replaceChildren(icon(enabled ? 'bell' : 'mute'), text);
+  }
+  function flushSuppressed() {
+    if (disposed || bypassing || !store.bypassPopups) return;
+    let state;
+    try { state = store.read(); } catch (error) { reportError(error); return; }
+    const ids = [...suppressed].filter(id => state.notices[id] && !state.notices[id].delivered);
+    if (!ids.length) return;
+    bypassing = true;
+    void store.bypassPopups(ids).catch(reportError).finally(() => { bypassing = false; });
+  }
+  function retainBypassedPopup(request) {
+    if (disposed) return;
+    if (request.beforeShow) {
+      suppressed.add(request.key); queueMicrotask(flushSuppressed);
+    } else if (store.retainPopup) return store.retainPopup(request).catch(reportError);
+  }
+  async function togglePopups() {
+    if (mutations.busy) return;
+    let enabled;
+    try { enabled = store.read().toastPopups === false; } catch (error) { reportError(error); return; }
+    dialog.querySelector('[data-popup-error]').hidden = true;
+    popupOverride = enabled;
+    notices.setEnabled?.(enabled, retainBypassedPopup);
+    renderPopupSetting(enabled);
+    await mutations.run('popups', () => store.setToastPopups(enabled));
+    popupOverride = undefined;
+    try { sync(store.read()); } catch (error) { reportError(error); }
   }
   function dismiss(id) { return mutations.run('dismiss', () => store.dismiss(id), {key:`dismiss:${id}`}); }
   function closeTray(focusBell = true) { if (dialog) { restoreFocus = focusBell; const current = dialog; exitSurface(current, () => current.close()); } }
@@ -100,29 +140,12 @@ export function createNotificationCenter(store, notices) {
     document.body.append(confirmation); confirmation.showModal(); enterSurface(confirmation); cancel.focus();
   }
 
-  function resetHistory() {
-    if (confirmation || mutations.busy) return;
-    confirmation = document.createElement('dialog'); confirmation.className = 'isi-portal-products'; confirmation.dataset.isiOwned = '';
-    const title = document.createElement('h2'); title.id = 'isi-reset-notices-title'; title.textContent = 'Reset notification history?';
-    const text = document.createElement('p'); text.textContent = 'Reset dismissed notifications and silenced reminders for this account, plus extension update reminders on this browser. Eligible reminders will appear again after the next check.';
-    const actions = document.createElement('div'); actions.className = 'isi-dialog-actions';
-    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'isi-portal-button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', closeConfirmation);
-    const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'isi-portal-button'; reset.textContent = 'Reset history';
-    reset.addEventListener('click', async () => {
-      if (await mutations.run('reset', () => store.reset(), {attempts:1})) { closeConfirmation(); notices.notify('Notification history reset.'); }
-    });
-    actions.append(cancel, reset); confirmation.append(title, text, actions); confirmation.setAttribute('aria-labelledby', title.id);
-    confirmation.addEventListener('cancel', event => { event.preventDefault(); if (!reset.disabled) closeConfirmation(); });
-    confirmation.addEventListener('close', () => { confirmation.remove(); confirmation = null; }, {once:true});
-    document.body.append(confirmation); confirmation.showModal(); enterSurface(confirmation); cancel.focus();
-  }
-
   function renderDialog(state) {
     if (!dialog) return;
+    if (clearMotion.busy) { pendingState = state; return; }
     const items = orderedNotices(state);
     const signature = JSON.stringify(items.map(({id,message,created,muteKey,type}) => ({id,message,created,muteKey,type})));
     if (signature === rendered) return;
-    clearMotion.cancel();
     rendered = signature;
     const list = dialog.querySelector('[data-notice-list]');
     list.querySelector('[data-notice-empty]')?.remove();
@@ -132,39 +155,31 @@ export function createNotificationCenter(store, notices) {
       if (!list.isConnected || list.querySelector('[data-notice-id],[data-notice-empty]')) return;
       const empty = document.createElement('p'); empty.dataset.noticeEmpty = ''; empty.textContent = 'No notifications'; list.append(empty);
     }
-    if (!items.length && rows.size > 1) {
-      clearDepartures(); listMotion.destroy();
-      dialog.querySelector('[aria-label="Close notifications"]').focus({preventScroll:true});
-      dialog.querySelector('[data-clear-notices]').disabled = true;
-      dialog.querySelector('[data-silence-notices]').disabled = true;
-      clearMotion.remove(list,[...rows.values()],emptyState);
-      return;
-    }
-    let departureIndex = 0;
-    for (const [id, row] of rows) if (!ids.has(id) && !row.dataset.noticeLeaving && !row.dataset.noticeQueued) {
-      if (row.contains(document.activeElement)) {
-        const next = [...rows].find(([key, node]) => ids.has(key) && !node.dataset.noticeLeaving)?.[1];
-        (next?.querySelector('button') || dialog.querySelector('[aria-label="Close notifications"]')).focus({ preventScroll: true });
+    const departing = [...rows].filter(([id]) => !ids.has(id)).map(([, row]) => row);
+    if (departing.length) {
+      if (departing.some(row => row.contains(document.activeElement)) || !items.length) {
+        dialog.querySelector('[aria-label="Close notifications"]').focus({preventScroll:true});
       }
-      const delay = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : Math.min(800, departureIndex++ * 55);
-      row.dataset.noticeQueued = 'true'; row.inert = true;
-      const depart = () => {
-        cancelDeparture(row);
-        if (row.isConnected) listMotion.remove(row, emptyState, -1);
-      };
-      if (delay) departures.set(row, setTimeout(depart, delay));
-      else depart();
+      listMotion.destroy();
+      pendingState = state;
+      void clearMotion.remove(list, departing, () => {
+        const latest = pendingState;
+        pendingState = null;
+        rendered = '';
+        if (latest) renderDialog(latest);
+      }, () => {
+        if (!Object.keys(pendingState?.notices || {}).length) emptyState();
+      });
+      renderBusy();
+      return;
     }
     for (const item of items) {
       const existing = rows.get(item.id);
-      if (existing) {
-        if (existing.dataset.noticeLeaving || existing.dataset.noticeQueued) { cancelDeparture(existing); listMotion.cancel(existing); delete existing.dataset.noticeLeaving; existing.inert = false; listMotion.enter(existing); }
-        continue;
-      }
+      if (existing) continue;
       const row = document.createElement('article'); row.className = 'isi-notification-entry';
       row.dataset.noticeId = item.id;
-      row.dataset.tone = notificationTone(item.type);
-      const mark = icon(row.dataset.tone === 'warning' ? 'clock' : 'check'); mark.classList.add('isi-notice-mark');
+      row.dataset.tone = item.type === 'system' && ['success','warning','error'].includes(item.tone) ? item.tone : notificationTone(item.type);
+      const mark = icon(row.dataset.tone === 'warning' ? 'clock' : row.dataset.tone === 'error' ? 'error' : 'check'); mark.classList.add('isi-notice-mark');
       const href = destination(item);
       const content = document.createElement(href ? 'a' : 'div'), text = document.createElement('p'), time = document.createElement('time');
       if (href) {
@@ -172,7 +187,7 @@ export function createNotificationCenter(store, notices) {
         if (item.type === 'update') { content.target = '_blank'; content.rel = 'noopener'; }
       }
       if (item.customer) { const customer = document.createElement('strong'); customer.className = 'isi-notification-customer'; customer.textContent = item.customer; content.append(customer); }
-      text.textContent = item.message; time.dateTime = new Date(item.created).toISOString(); time.textContent = new Date(item.created).toLocaleString();
+      text.textContent = notificationText(item); time.dateTime = new Date(item.created).toISOString(); time.textContent = new Date(item.created).toLocaleString();
       content.append(text, time);
       const actions = document.createElement('div'); actions.className = 'isi-notice-actions';
       if (item.muteKey) actions.append(iconButton('mute', 'Silence this notification type', () => mute(item)));
@@ -197,6 +212,12 @@ export function createNotificationCenter(store, notices) {
   function sync(state) {
     if (disposed) return;
     const items = orderedNotices(state);
+    const popupsEnabled = popupOverride ?? (state.toastPopups !== false);
+    notices.setEnabled?.(popupsEnabled, retainBypassedPopup);
+    renderPopupSetting(popupsEnabled);
+    for (const id of suppressed) if (!state.notices[id] || state.notices[id].delivered) suppressed.delete(id);
+    if (!popupsEnabled) for (const item of items) if (!item.delivered) suppressed.add(item.id);
+    flushSuppressed();
     const updateCount = items.filter(item => item.type === 'update').length;
     const regularCount = items.length - updateCount;
     badge.textContent = String(regularCount); badge.hidden = !regularCount;
@@ -205,11 +226,11 @@ export function createNotificationCenter(store, notices) {
     for (const id of scheduled) if (!state.notices[id] || (state.notices[id].delivered && !shown.has(id))) { notices.dismiss(id); scheduled.delete(id); }
     for (const id of shown) if (!state.notices[id]) shown.delete(id);
     renderDialog(state);
-    if (document.hidden || !document.hasFocus()) return;
+    if (!popupsEnabled || document.hidden || !document.hasFocus()) return;
     for (const item of items) {
-      if (item.delivered || scheduled.has(item.id)) continue;
+      if (item.delivered || scheduled.has(item.id) || suppressed.has(item.id)) continue;
       scheduled.add(item.id);
-      const accepted = notices.notify(item.message, {
+      const accepted = notices.notify(notificationText(item, {compact:true}), {
         href:destination(item), newTab:item.type === 'update', customer:item.customer,
         key: item.id, tone: notificationTone(item.type), onDismiss: () => dismiss(item.id), onMute: item.muteKey ? () => mute(item) : undefined,
         beforeShow: () => store.claim(item.id), isCurrent: () => Boolean(store.read().notices[item.id]),
@@ -246,15 +267,15 @@ export function createNotificationCenter(store, notices) {
     });
     const list = document.createElement('div'); list.dataset.noticeList = '';
     const close = iconButton('close', 'Close notifications', () => closeTray());
-    const header = document.createElement('header'); header.className = 'isi-notification-header'; header.append(heading, silence, clear, close);
+    const popups = document.createElement('button'); popups.type = 'button'; popups.className = 'isi-portal-button'; popups.dataset.toastPopups = '';
+    popups.setAttribute('role', 'switch'); popups.setAttribute('aria-label', 'Toast popups'); popups.addEventListener('click', togglePopups);
+    const controls = document.createElement('div'); controls.className = 'isi-notification-controls'; controls.append(popups, silence, clear);
+    const error = document.createElement('p'); error.dataset.popupError = ''; error.hidden = true; error.setAttribute('role', 'alert');
+    const header = document.createElement('header'); header.className = 'isi-notification-header'; header.append(heading, close, controls, error);
     dialog.append(header, list); dialog.setAttribute('aria-labelledby', heading.id);
-    if (store.reset) {
-      const footer = document.createElement('footer'); footer.className = 'isi-dialog-actions';
-      const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'isi-portal-button'; reset.textContent = 'Reset notification history'; reset.dataset.resetNotices = ''; reset.addEventListener('click', resetHistory);
-      footer.append(reset); dialog.append(footer);
-    }
+    renderPopupSetting(popupOverride ?? (state.toastPopups !== false));
     restoreFocus = true;
-    dialog.addEventListener('close', () => { clearDepartures(); clearMotion.cancel(); listMotion.destroy(); dialog.remove(); dialog = null; button.setAttribute('aria-expanded', 'false'); if (restoreFocus && !disposed && button.isConnected) button.focus(); }, { once: true });
+    dialog.addEventListener('close', () => { pendingState = null; clearMotion.cancel(); listMotion.destroy(); dialog.remove(); dialog = null; button.setAttribute('aria-expanded', 'false'); if (restoreFocus && !disposed && button.isConnected) button.focus(); }, { once: true });
     document.body.append(dialog); renderDialog(state); dialog.show(); positionTray(); enterSurface(dialog); button.setAttribute('aria-expanded', 'true'); close.focus();
   }
   const outside = event => { if (dialog && !confirmation && !dialog.contains(event.target) && !button.contains(event.target)) closeTray(false); };

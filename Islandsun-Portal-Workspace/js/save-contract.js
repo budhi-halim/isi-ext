@@ -1,4 +1,4 @@
-import { requestDetailUrl, sampleType } from './logic.js';
+import { sampleType } from './logic.js';
 
 export function portalPath(value) {
   return value.replace(/^\/islandsun\/index\.php\//i, '/islandsun/').replace(/\/$/, '').toLowerCase();
@@ -20,12 +20,6 @@ export function saveContract(action, current) {
   return null;
 }
 
-/** Require every submitted non-hidden field to be present with the same returned value. */
-export function sameSavedFields(expected, actual) {
-  return Boolean(expected && actual) && Object.keys(expected).length > 0 && Object.entries(expected).every(([name,value]) =>
-    Object.hasOwn(actual, name) && JSON.stringify(value) === JSON.stringify(actual[name]));
-}
-
 /** A complete fresh index is required to distinguish new requests from existing drafts. */
 export function tirSaveIndex(payload) {
   const total = Number(payload?.recordsFiltered);
@@ -38,16 +32,6 @@ export function tirSaveIndex(payload) {
     const id = String(row?.id_tir ?? '');
     if (!/^[1-9]\d{0,11}$/.test(id) || records.has(id)) throw new Error('The TIR list contains inconsistent record identifiers.');
     records.set(id, {id, number:String(row.tir_no ?? '').trim(), customer:String(row.customer ?? '').trim()});
-  }
-  return records;
-}
-
-/** Never infer ownership from row order, the largest ID, or a matching older draft. */
-export function newTirRecords(before, after) {
-  if ([...before.keys()].some(id => !after.has(id))) throw new Error('The TIR list changed unexpectedly during saving.');
-  const records = [...after.values()].filter(record => !before.has(record.id));
-  if (records.some(record => !/^\d+\/[IVX]+\/\d{4}\/TIR$/i.test(record.number))) {
-    throw new Error('The saved TIR number could not be verified.');
   }
   return records;
 }
@@ -69,18 +53,3 @@ export function sampleSaveIndex(payload) {
   return records;
 }
 
-/** Recovery can only follow a unique, newly saved SRF with the expected request type. */
-export function recoveredSample(before, after, pending) {
-  if (!before || [...before.keys()].some(id => !after.has(id))) throw new Error('The Sample list changed unexpectedly during saving.');
-  const matches = [...after.values()].filter(record => record.number === pending.number);
-  if (matches.length !== 1) return null;
-  const record = matches[0];
-  if (before.has(record.id) || record.type !== pending.sampleType) return null;
-  const url = requestDetailUrl(record.id, record.type);
-  return url ? {...record, url} : null;
-}
-
-export function sameSavedRecord(pending, record) {
-  return Boolean(record && pending.kind === record.kind && (pending.id ? pending.id === record.id : pending.kind === 'sample' && pending.number === record.number)
-    && (!pending.number || pending.number === record.number));
-}

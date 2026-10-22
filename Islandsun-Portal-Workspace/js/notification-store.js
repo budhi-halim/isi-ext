@@ -4,6 +4,7 @@ import { registerSubmission, observeSubmissionStatuses, submissionRecord, SUBMIS
 import { pruneNotificationState } from './notification-relevance.js';
 import { diagnosticLog } from './diagnostic-log.js';
 import { registerSaveAttempt, observeDraftStatuses, advanceDraftReminders } from './draft-reminders.js';
+import { bypassPopupNotices, retainPopupNotice } from './notification-popup-state.js';
 
 /** A same-origin lock serializes localStorage updates across portal tabs. */
 export function createNotificationStore(account, { storage = localStorage, locks = navigator.locks, onError = () => {} } = {}) {
@@ -60,7 +61,9 @@ export function createNotificationStore(account, { storage = localStorage, locks
           previous = (name.startsWith(savePrefix) ? registerSaveAttempt : registerSubmission)(previous, JSON.parse(storage.getItem(name)));
         } catch { /* A malformed outbox entry cannot become a save or submission. */ }
       }
-      const next = pruneNotificationState(transform(previous)), after = JSON.stringify(next);
+      let next = pruneNotificationState(transform(previous));
+      if (next.toastPopups === false) next = bypassPopupNotices(next);
+      const after = JSON.stringify(next);
       stage = 'write';
       if (after !== before) storage.setItem(key, after);
       if (['dismiss', 'silence', 'silence-all', 'clear'].includes(operation)) {
@@ -102,6 +105,12 @@ export function createNotificationStore(account, { storage = localStorage, locks
   } catch (error) { reportError(error,'read'); }
   return {
     key, read, account,
+    setToastPopups: enabled => update(state => ({
+      ...(enabled === false || state.toastPopups === false ? bypassPopupNotices(state) : state),
+      toastPopups:Boolean(enabled),
+    }), 'popup-setting'),
+    bypassPopups: ids => update(state => bypassPopupNotices(state, ids), 'bypass-popups'),
+    retainPopup: request => update(state => retainPopupNotice(state, request), 'retain-popup'),
     saveMonitor: monitor => update(state => ({...state,monitor}), 'save-schedule'),
     registerSave(record) {
       if (disposed || !['sample','tir'].includes(record.kind)) return;
@@ -148,12 +157,11 @@ export function createNotificationStore(account, { storage = localStorage, locks
       for (const item of selected) delete next.notices[item.id];
       return next;
     }, 'clear'),
-    reset: () => update(() => emptyNotificationState(), 'reset'),
     async claim(id) {
       let claimed = false;
       await update(state => {
         const item = state.notices[id];
-        if (item && !item.delivered && (!item.claim || item.claim.until < Date.now() || item.claim.owner === owner)) {
+        if (state.toastPopups !== false && item && !item.delivered && (!item.claim || item.claim.until < Date.now() || item.claim.owner === owner)) {
           item.claim = { owner, until: Date.now() + 15000 }; claimed = true;
         }
         return state;

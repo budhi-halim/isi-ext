@@ -103,8 +103,8 @@ export function startUpdateService({ key, discoverFamily = false, api = chrome, 
       return transaction(state => ({ ok: true, state: structuredClone(state) }));
     }
     if (!discoverFamily) return { ok: false };
-    if (!['clear', 'reset', 'claim', 'release', 'delivered', 'dismiss'].includes(message.action)) return { ok: false };
-    if (!['clear','reset'].includes(message.action) && (typeof message.id !== 'string' || message.id.length > 150 || !message.id.startsWith('extension-update:'))) return { ok: false };
+    if (!['clear', 'claim', 'release', 'delivered', 'dismiss', 'bypass'].includes(message.action)) return { ok: false };
+    if (message.action !== 'clear' && (typeof message.id !== 'string' || message.id.length > 150 || !message.id.startsWith('extension-update:'))) return { ok: false };
     const owner = `${sender.tab?.id ?? 'popup'}:${sender.documentId ?? ''}:${message.owner}`;
     if (typeof message.owner !== 'string' || message.owner.length > 100) return { ok: false };
     return transaction(state => {
@@ -114,9 +114,9 @@ export function startUpdateService({ key, discoverFamily = false, api = chrome, 
         item.claim = { owner, until: now() + 15000 }; claimed = true;
       } else if (message.action === 'release' && item?.claim?.owner === owner) delete item.claim;
       else if (message.action === 'delivered' && item?.claim?.owner === owner) { item.delivered = true; delete item.claim; }
+      else if (message.action === 'bypass' && item) { item.delivered = true; delete item.claim; }
       else if (message.action === 'dismiss') delete state.notices[message.id];
       else if (message.action === 'clear') state.notices = {};
-      else if (message.action === 'reset') { state.notices = {}; state.reminders = {}; }
       return { ok: true, claimed, state: structuredClone(state) };
     });
   }

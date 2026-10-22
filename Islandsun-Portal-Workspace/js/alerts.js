@@ -36,10 +36,7 @@
     if (pendingSave) return;
     if (confirmation.action === 'Save' && !button.dispatchEvent(new CustomEvent('islandsun-before-save', {bubbles: true, cancelable: true}))) return;
     pendingSave = { ...confirmation, button, eventType: event.type, submitter: event.submitter, id: ++sequence };
-    const combined = button.closest('form[data-isi-save-submit]')
-      || (button.closest('#modal-produk-masuk') && document.querySelector('form[data-isi-save-submit]'));
-    document.dispatchEvent(new CustomEvent('islandsun-confirm-request', { detail: { id: pendingSave.id, message: confirmation.message, action: confirmation.action,
-      combined:!!combined, authorized:combined?.dataset.isiSaveSubmitAuthorized === 'true' } }));
+    document.dispatchEvent(new CustomEvent('islandsun-confirm-request', { detail: { id: pendingSave.id, message: confirmation.message, action: confirmation.action } }));
   }
   document.addEventListener('click', intercept, true);
   document.addEventListener('submit', intercept, true);

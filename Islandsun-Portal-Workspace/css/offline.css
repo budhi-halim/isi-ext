@@ -57,7 +57,7 @@ body.offline-workspace { --offline-header-height: 76px; margin: 0; height: 100sv
 .offline-workspace #list-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .offline-workspace .offline-table-card { display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; flex: 1; min-height: 0; }
 .offline-workspace .offline-table-scroll { min-height: 0; max-height: none; }
-.offline-workspace :is(#sections,main,.offline-table-scroll,.offline-detail-table,.offline-calendar-scroll,.offline-storage-content,.offline-report-scroll,.offline-filters,#columns) { scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--isi-border) transparent; overscroll-behavior: contain; }
+.offline-workspace :is(#sections,main,.offline-table-scroll,.offline-detail-table,.offline-calendar-scroll,.offline-storage-content,.offline-filters,#columns) { scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--isi-border) transparent; overscroll-behavior: contain; }
 .offline-workspace *, .offline-workspace *::before, .offline-workspace *::after { box-sizing: border-box; }
 .offline-workspace button, .offline-workspace input, .offline-workspace select { font: inherit; }
 .offline-workspace [hidden] { display: none !important; }
@@ -139,13 +139,6 @@ body.offline-workspace { --offline-header-height: 76px; margin: 0; height: 100sv
 .offline-storage .isi-button { margin: 8px 8px 0 0; }
 #record-view { animation: offline-appear 180ms ease-out; }
 #record-title:focus { outline: none; }
-#archive-report { min-width: 0; margin-block: 20px; }
-.offline-report-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 12px; }
-.offline-report-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--isi-border); border-radius: var(--isi-control-radius); }
-.offline-report-scroll table { width: 100%; min-width: 800px; }
-.offline-report-scroll th, .offline-report-scroll td { padding: 12px; text-align: start; vertical-align: top; white-space: normal; }
-.offline-report-scroll small { display: block; margin-block-start: 8px; color: var(--isi-muted); }
-[data-report-text] { width: 100%; min-height: 240px; margin-block: 12px; resize: vertical; user-select: text; }
 #record-number { margin-top: 10px; font-weight: 600; }
 #detail-time { margin-bottom: 20px; }
 #record-content { display: grid; grid-template-columns: minmax(0,1fr); gap: 20px; }

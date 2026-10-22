@@ -65,48 +65,9 @@
       <div class="offline-storage-content" role="region" aria-label="Archive coverage and storage">
       <button id="close-archive-panel" class="isi-button" type="button">Close archive panel</button>
       <p id="connection"></p>
-      <section id="debug-capture" aria-labelledby="debug-capture-title">
-        <h2 id="debug-capture-title">Diagnostic recording</h2>
-          <p>Record archive, preview and session-check responses, processing, navigation state and shared queue activity. Captures stay on this device, protected with this account’s offline key. Downloaded bundles contain private business data; share them only for this investigation.</p>
-          <p>Recording does not increase request concurrency or submit records. It stops after 15 minutes, 10,000 events or 64 MB. Individual responses are limited to 8 MB and marked if incomplete. Login pages and known credential fields are excluded. Native page/table response bodies and Revenue Extractor traffic are not captured.</p>
-        <p data-debug-status role="status"></p>
-        <p data-debug-message role="status"></p>
-        <div class="offline-report-actions">
-          <button class="isi-button" type="button" data-debug-start>Start diagnostic capture</button>
-          <button class="isi-button" type="button" data-debug-stop disabled>Stop capture</button>
-          <button class="isi-button" type="button" data-debug-download disabled>Download diagnostic bundle</button>
-          <button class="isi-button" type="button" data-debug-clear disabled>Delete diagnostic capture</button>
-        </div>
-      </section>
-      <section id="archive-report" aria-labelledby="archive-report-title">
-        <h2 id="archive-report-title">Archive verification report</h2>
-        <p data-report-status role="status"></p>
-        <div class="offline-report-actions">
-          <button class="isi-button" type="button" data-report-refresh>Generate archive report</button>
-          <button class="isi-button" type="button" data-report-copy disabled>Copy archive verification report</button>
-          <button class="isi-button" type="button" data-report-download disabled>Download archive report</button>
-        </div>
-        <div class="offline-report-scroll" tabindex="0" aria-label="Scrollable archive coverage">
-          <table><thead><tr><th scope="col">Section</th><th scope="col">Saved coverage</th><th scope="col">Saved / server list</th><th scope="col">Details</th><th scope="col">Files saved / discovered</th></tr></thead><tbody></tbody></table>
-        </div>
-        <textarea data-report-text aria-label="Archive verification report; select and copy" readonly hidden></textarea>
-        <p>Counts are read locally while archiving may continue. Files are counted from saved details; unsaved details may contain more files. A caught-up snapshot does not confirm complete historical coverage.</p>
-      </section>
-      <section id="archive-sources" aria-labelledby="archive-sources-title">
-        <h2 id="archive-sources-title">Saved source responses</h2>
-        <p>Export locally saved detail and print responses for parser investigation, without fetching them again. The compressed download contains private business data and is not password-protected. Share it only for this investigation.</p>
-        <label for="source-section">Source section</label>
-        <select id="source-section" data-source-section></select>
-        <p data-source-status role="status"></p>
-        <div class="offline-report-actions">
-          <button class="isi-button" type="button" data-source-prepare>Prepare source export</button>
-          <button class="isi-button" type="button" data-source-cancel disabled>Cancel source export</button>
-          <button class="isi-button" type="button" data-source-download disabled>Download saved sources</button>
-        </div>
-      </section>
       <p id="storage"></p><p id="retention"></p>
       <p>Records and documents fill in gradually while the portal is available. Details may be older than the list. Items without a saved detail or file are marked explicitly.</p>
-      <p>Historical coverage and supplemental details are still being verified. Stock Card monthly history, Undelivered Stock and generated Delivery Order print sheets are excluded. Offline creation, editing and submission are deferred.</p>
+      <p>Stock Card monthly history, Undelivered Stock and generated Delivery Order print sheets are excluded. Create, edit and submit requests in the live portal.</p>
       <button id="persist" class="isi-button" type="button">Keep archive on this device</button>
       <button id="check" class="isi-button" type="button">Check connection and sync</button>
       </div>

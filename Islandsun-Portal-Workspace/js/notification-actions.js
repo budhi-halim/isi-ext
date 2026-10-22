@@ -7,7 +7,7 @@ const FAILURE_MESSAGES = {
   silence: 'Couldn’t silence this notification type. Please try again later.',
   'silence-all': 'Couldn’t silence these notifications. Please try again later.',
   clear: 'Couldn’t clear all notifications. Please try again later.',
-  reset: 'Couldn’t reset notification history. Please try again later.',
+  popups: 'Couldn’t change popup settings. Please try again later.',
 };
 
 /** Retry only local notification actions, with one owner and cancellable waits. */

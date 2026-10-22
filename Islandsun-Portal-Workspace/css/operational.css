@@ -205,7 +205,7 @@
   [data-isi-portal="enabled"] [data-isi-sample-form] [data-isi-sample-potential] td:nth-child(3n + 1) { grid-column: 1 / -1; margin-block-start: 8px; }
 }
 
-/* === Save and Submit === */
+/* === Request Actions === */
 html[data-isi-portal="enabled"] .isi-save-actions {
   display: flex;
   flex-wrap: wrap;
@@ -223,22 +223,7 @@ html[data-isi-portal="enabled"] .isi-save-actions > :is(button,input,a,.isi-save
   margin: 0 !important;
   flex: 0 0 auto;
 }
-html[data-isi-portal="enabled"] .isi-save-submit-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-block-end: 0.75rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--isi-border);
-  border-radius: var(--isi-radius, 12px);
-  background: var(--isi-surface);
-}
-html[data-isi-portal="enabled"] .isi-save-submit-status p { margin: 0; }
-
-
-/* === Native Submission Progress === */
+/* === Feedback Tables === */
 [data-isi-portal="enabled"] [data-isi-feedback-scroll] {
   width: 100%;
   min-width: 0;
@@ -276,15 +261,6 @@ html[data-isi-portal="enabled"] .isi-save-submit-status p { margin: 0; }
 [data-isi-portal="enabled"] [data-isi-feedback-scroll] :is(.btn,button) { white-space: nowrap; }
 
 /* === Request Loading === */
-.isi-save-frame {
-  position: fixed;
-  width: 1px;
-  height: 1px;
-  inset: 0 auto auto 0;
-  opacity: 0;
-  pointer-events: none;
-  border: 0;
-}
 .isi-request-progress {
   height: 6px;
   margin-block: 16px;
@@ -309,6 +285,3 @@ html[data-isi-portal="enabled"] .isi-save-submit-status p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   .isi-request-progress > span { animation: none; transform: translateX(116%); will-change: auto; }
 }
-.isi-save-choices { display: grid; gap: 10px; max-height: 40svh; overflow: auto; scrollbar-width: thin; }
-.isi-save-choices button { text-align: start; }
-.isi-save-progress[data-state="success"] { border-color: var(--isi-primary); }

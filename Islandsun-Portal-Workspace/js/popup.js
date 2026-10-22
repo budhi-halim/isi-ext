@@ -1,6 +1,6 @@
 import { initializeUpdatePopup } from './shared/update-popup.js';
 import { initializeTheme } from '../assets/family/js/theme.js';
-import { DIAGNOSTICS_KEY, DIAGNOSTIC_FAILURES_KEY, diagnosticState, diagnosticArchiveSource } from './connection-diagnostics.js';
+import { diagnosticArchiveSource } from './connection-diagnostics.js';
 import { SESSION_KEY } from './session-keepalive.js';
 import { OFFLINE_STATUS, OFFLINE_SOURCES } from './offline-config.js';
 import { readArchive } from './offline-store.js';
@@ -71,26 +71,6 @@ if (globalThis.chrome?.storage) chrome.storage.onChanged.addListener((changes,ar
 $('#open-portal').addEventListener('click',() => {
   const url = 'http://apps.islandsunindonesia.com:81/islandsun/';
   if (globalThis.chrome?.tabs) chrome.tabs.create({url}); else window.open(url,'_blank','noopener');
-});
-$('#copy-diagnostics').addEventListener('click',async event => {
-  const button = event.currentTarget, message = $('#diagnostics-status');
-  if (button.disabled || !account) return;
-  button.disabled = true;
-  const owner = account;
-  try {
-    const [saved, session, settings] = await Promise.all([
-      chrome.storage.local.get([DIAGNOSTICS_KEY,DIAGNOSTIC_FAILURES_KEY,OFFLINE_STATUS,'enabled']),
-      chrome.storage.session.get(SESSION_KEY), readAccountSettings(),
-    ]);
-    const sources = await Promise.all(Object.keys(OFFLINE_SOURCES).map(async kind => diagnosticArchiveSource(kind,await readArchive('meta',`index:${owner}:${kind}`))));
-    if (!owner || settings.account !== owner || (await readAccountSettings()).account !== owner) throw new Error('Account changed.');
-    await navigator.clipboard.writeText(JSON.stringify({version:chrome.runtime.getManifest().version,enabled:saved.enabled !== false,
-      ...diagnosticState(settings,session[SESSION_KEY],saved[OFFLINE_STATUS]),
-      sources,
-      events:saved[DIAGNOSTICS_KEY] || [],failures:saved[DIAGNOSTIC_FAILURES_KEY] || []},null,2));
-    message.textContent = 'Diagnostics copied.';
-  } catch { message.textContent = 'Could not copy diagnostics. Please try again.'; }
-  finally { button.disabled = false; }
 });
 render();
 

@@ -1,46 +1,76 @@
-/** Animate the visible slice without removing rows until the whole batch has left. */
+const EXIT_DURATION = 220;
+const MOVE_DURATION = 240;
+const EASING = 'cubic-bezier(.2,.8,.2,1)';
+
+/** Sweep the visible departing cards, then close gaps without exposing offscreen departures. */
 export function createTrayClearMotion() {
   let active;
+
   function cancel() {
     if (!active) return;
-    clearTimeout(active.timer);
-    for (const timer of active.starts) clearTimeout(timer);
-    for (const animation of active.animations) animation.cancel();
-    for (const row of active.rows) {
-      delete row.dataset.noticeQueued; delete row.dataset.noticeLeaving; delete row.dataset.noticeSkipped;
+    const batch = active;
+    active = null;
+    for (const animation of batch.animations) animation.cancel();
+    for (const row of batch.rows) {
+      delete row.dataset.noticeLeaving;
+      delete row.dataset.noticeSkipped;
       row.inert = false;
     }
-    delete active.list.dataset.noticeClearing;
-    active = null;
+    delete batch.list.dataset.noticeClearing;
+    delete batch.dialog.dataset.noticeMoving;
   }
-  return {
-    cancel,
-    remove(list, rows, done) {
-      cancel();
-      const batch = {list,rows,starts:[],animations:[]}; active = batch;
-      const box = list.getBoundingClientRect(), dialog = list.closest('dialog').getBoundingClientRect();
-      const top = Math.max(0,box.top,dialog.top), bottom = Math.min(innerHeight,box.bottom,dialog.bottom);
-      const visible = rows.filter(row => { const rect = row.getBoundingClientRect(); return rect.bottom > top && rect.top < bottom; });
-      const finish = () => {
-        if (active !== batch) return;
-        for (const row of rows) row.remove();
-        cancel(); done();
-      };
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches || !visible.length) { finish(); return; }
-      list.dataset.noticeClearing = '';
-      for (const row of rows) { row.inert = true; row.dataset.noticeQueued = 'true'; }
-      for (const row of rows) if (!visible.includes(row)) row.dataset.noticeSkipped = '';
-      visible.forEach((row,index) => {
-        const start = () => {
-          if (active !== batch) return;
-          delete row.dataset.noticeQueued; row.dataset.noticeLeaving = 'true';
-          if (row.animate) batch.animations.push(row.animate([
-            {opacity:1,transform:'none'}, {opacity:0,transform:'translateX(-32px)'},
-          ], {duration:180,easing:'cubic-bezier(.2,.8,.2,1)',fill:'forwards'}));
-        };
-        if (index) batch.starts.push(setTimeout(start,index*55)); else start();
-      });
-      batch.timer = setTimeout(finish,(visible.length-1)*55+190);
-    },
-  };
+
+  function animate(batch, node, frames, duration, delay = 0) {
+    if (!node.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+    const animation = node.animate(frames, {duration, delay, easing:EASING, fill:'both'});
+    batch.animations.add(animation);
+    return animation.finished.catch(() => {});
+  }
+
+  async function remove(list, rows, done, afterRemoval = () => {}) {
+    cancel();
+    const dialog = list.closest('dialog');
+    const batch = {list, dialog, rows, animations:new Set()};
+    active = batch;
+    list.dataset.noticeClearing = '';
+    dialog.dataset.noticeMoving = '';
+    const box = dialog.getBoundingClientRect();
+    const header = dialog.querySelector('.isi-notification-header')?.getBoundingClientRect();
+    const top = Math.max(0, box.top, header?.bottom || 0), bottom = Math.min(innerHeight, box.bottom);
+    const visible = node => {
+      const rect = node.getBoundingClientRect();
+      return rect.bottom > top && rect.top < bottom;
+    };
+    const visibleRows = rows.filter(visible);
+    const step = Math.min(65, 420 / Math.max(1, visibleRows.length - 1));
+    await Promise.all(rows.map(row => {
+      row.inert = true;
+      row.dataset.noticeLeaving = 'true';
+      const index = visibleRows.indexOf(row);
+      if (index < 0) { row.dataset.noticeSkipped = ''; return undefined; }
+      const style = getComputedStyle(row);
+      return animate(batch, row, [
+        {opacity:style.opacity, transform:style.transform},
+        {opacity:0, transform:'translateX(-48px)'},
+      ], EXIT_DURATION, index * step);
+    }));
+    if (active !== batch) return;
+
+    const before = new Map([...list.children].map(node => [node, node.getBoundingClientRect().top]));
+    const height = getComputedStyle(list).height;
+    for (const row of rows) row.remove();
+    afterRemoval();
+    const targetHeight = getComputedStyle(list).height;
+    // Measure the final scroll position before fixing the list's starting height.
+    const offsets = [...list.children].map(node => ({node, offset:before.get(node) - node.getBoundingClientRect().top}));
+    const movement = offsets.filter(({node, offset}) => Math.abs(offset) > .5 && visible(node)).map(({node, offset}) =>
+      animate(batch, node, [{transform:`translateY(${offset}px)`}, {transform:'none'}], MOVE_DURATION));
+    if (height !== targetHeight) movement.push(animate(batch, list, [{height}, {height:targetHeight}], MOVE_DURATION));
+    await Promise.all(movement);
+    if (active !== batch) return;
+    cancel();
+    done();
+  }
+
+  return {get busy() { return Boolean(active); }, cancel, remove};
 }

@@ -29,7 +29,8 @@ import { createFormEditMode } from './form-edit-mode.js';
 import { createDropdownTranslation } from './dropdown-translation.js';
 import { createUnsavedChanges } from './unsaved-changes.js';
 import { createFormValidation } from './form-validation.js';
-import { createSaveSubmit } from './save-submit.js';
+import { createSavedRequestNavigation } from './saved-request-navigation.js';
+import { createRequestActions } from './request-actions.js';
 import { setOfflineAccount } from './offline-observer.js';
 import { createObservedSampleTable } from './offline-observed-table.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
@@ -70,7 +71,8 @@ async function start() {
   const account = accountLink ? new URL(accountLink.href).searchParams.get('user') : null;
   setOfflineAccount(account);
   const observedTable = createObservedSampleTable(account);
-  const saveSubmit = createSaveSubmit({notify:notices.notify, canEdit:form => editMode.canEdit(form), account, onSaved:form => unsavedChanges.markSaved(form), onSubmission:record => store?.registerSubmission(record)});
+  const savedNavigation = createSavedRequestNavigation(account, notices.notify);
+  const requestActions = createRequestActions();
   const repository = createProductCache(readProducts, { persistence: productSession(account) });
   const products = createProductPreview(notices.notify, repository);
   const navigation = createNavigation();
@@ -86,7 +88,7 @@ async function start() {
   function checkAccount(scope) {
     if (!account || !scope || scope.account === account || accountPaused) return;
     accountPaused = true;
-    saveSubmit.destroy();
+    savedNavigation.destroy();
     improvementPrefill.destroy();
     observedTable.destroy();
     monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy(); archiveFeedback?.destroy();
@@ -100,7 +102,7 @@ async function start() {
     archiveFeedback = createArchiveStatusNotices(account, notices);
     const trackingFailure = operation => error => diagnosticLog('notification-tracking-failed', { operation, errorType:error.name, message:String(error.message).slice(0,500) });
     submissions = createSubmissionTracking(store, trackingFailure('submission'));
-    saves = createSavedRequestTracking(store, trackingFailure('save'));
+    saves = createSavedRequestTracking(store, trackingFailure('save'), savedNavigation.capture);
     combinedStore = withUpdateNotifications(store, {onError:trackingFailure('updates')});
     center = createNotificationCenter(combinedStore, notices);
     const accountName = document.querySelector('.user-menu > a')?.textContent.trim().replace(/\s+/g, ' ');
@@ -122,7 +124,7 @@ async function start() {
     editMode.enhance();
     observedTable.enhance();
     unsavedChanges.enhance();
-    saveSubmit.enhance();
+    requestActions.enhance();
     if (!accountPaused) improvementPrefill.enhance();
     submissions?.observe();
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
@@ -136,7 +138,7 @@ async function start() {
     document.removeEventListener('islandsun-table-draw', enhance);
     clearTimeout(timer); observer.disconnect(); dropdownTranslation.destroy(); theme?.destroy({ preserveScheme: preservePresentation });
     monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy(); archiveFeedback?.destroy();
-    improvementPrefill.destroy(); saveSubmit.destroy(preservePresentation); validation.destroy(); unsavedChanges.destroy(); editMode.destroy(); dialogs.destroy();
+    improvementPrefill.destroy(); savedNavigation.destroy(); requestActions.destroy(); validation.destroy(); unsavedChanges.destroy(); editMode.destroy(); dialogs.destroy();
     modalAccessibility.destroy(); textareaLimits.destroy(); documents.destroy(); products.destroy(); navigation.destroy(); notices.destroy(); calendar.destroy(); cancelMotion(); releaseTableControls(); operationalForms.destroy(); tirForm.destroy(); journal.restore(); sampleForms.destroy(); teardown = null;
     document.querySelector('#isi-portal-theme')?.closest('[data-isi-owned]')?.remove();
     if (!preservePresentation) { delete document.documentElement.dataset.isiPortal; delete document.documentElement.dataset.isiLayout; delete document.documentElement.dataset.theme; document.documentElement.classList.remove('isi-theme'); document.documentElement.dataset.isiBoot = 'off'; }

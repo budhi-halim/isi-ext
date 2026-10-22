@@ -8,4 +8,4 @@ Shared design assets come from the sibling `isi/family` package. Synchronize the
 
 For publication, install the pinned tools with `npm ci --prefix tools/site-build --ignore-scripts` and run `node tools/site-build/build.mjs`. The allowlist in `site-build.json` produces a minified site and three ZIP downloads under ignored `dist/`. GitHub Pages publishes this output. Developer notes, diagnostics, source responses, screenshots and obsolete prototypes are not published.
 
-Portal Workspace's offline copy is read only. It requires password unlock and preserves account boundaries. Live form submission uses the portal's own workflow; only test submissions using genuine, specifically authorized business requests.
+Portal Workspace's offline copy is read only. It requires password unlock and preserves account boundaries. An ordinary Sample or TIR Save opens its uniquely identified detail page in the same tab; the user submits through the portal's own Submit action. There is no combined Save & Submit workflow. Only test live submissions using genuine, specifically authorized business requests.
