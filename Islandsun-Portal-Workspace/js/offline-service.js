@@ -106,14 +106,15 @@ export function startOfflineService(gate, diagnostics, debug) {
     if (reset && (!reset.account || reset.account === message.account) && (reset.clearing || message.observedAt <= reset.at)) return {...settings,enabled:false};
     return settings;
   }
-  async function recordedParse(operation,data) {
+  async function recordedParse(operation,data,context = trace) {
     const started=Date.now();
-    await note('processing-start',{operation,recordId:data.record?.id || data.record?.number,kind:data.kind});
+    const fields = {...context,operation,recordId:data.record?.id || data.record?.number,sourceKind:data.kind || data.record?.kind};
+    await note('processing-start',fields);
     try {
       const result=await parse(operation,data);
-      await note('processing-complete',{operation,durationMs:Date.now()-started,summary:result && typeof result==='object' ? {number:result.number,complete:result.complete,cursor:result.cursor,total:result.total,stored:result.stored,skippedIdentifiers:result.skippedIdentifiers,documents:result.documents?.length,tables:result.tables?.length} : {}});
+      await note('processing-complete',{...fields,durationMs:Date.now()-started,summary:result && typeof result==='object' ? {number:result.number,complete:result.complete,cursor:result.cursor,total:result.total,stored:result.stored,skippedIdentifiers:result.skippedIdentifiers,documents:result.documents?.length,tables:result.tables?.length} : {}});
       return result;
-    } catch(error){await note('processing-failed',{operation,...capturedError(error),durationMs:Date.now()-started,failure:true});throw error;}
+    } catch(error){await note('processing-failed',{...fields,...capturedError(error),durationMs:Date.now()-started,failure:true});throw error;}
   }
   async function retainFailure(kind,error,durationMs,stage) {
     if (!runningAccount || error.name === 'AbortError') return;
@@ -251,6 +252,7 @@ export function startOfflineService(gate, diagnostics, debug) {
               return response.text();
             });
             if (outcome.deferred) return;
+            const sourceTrace = trace;
             await wait(300,signal);
             const verified = await runRead('archive-identity', async laneSignal => {
               const response = await readResponse(PORTAL_HOME,AbortSignal.any([signal,laneSignal]));
@@ -266,7 +268,7 @@ export function startOfflineService(gate, diagnostics, debug) {
               await note('index-source-retention-failed',{code:error.name});
             }
             let imported;
-            try { imported = await recordedParse(refreshHead ? 'index-head' : 'index-page',{account,kind:due.kind,scan,text:outcome.result}); }
+            try { imported = await recordedParse(refreshHead ? 'index-head' : 'index-page',{account,kind:due.kind,scan,text:outcome.result},sourceTrace); }
             catch (error) {
               if (!signal.aborted && error.name !== 'AbortError') {
                 try { await retainFailedIndexSource(retained,signal); }
@@ -294,6 +296,7 @@ export function startOfflineService(gate, diagnostics, debug) {
             return response.text();
           });
           if (outcome.deferred) return;
+          const sourceTrace = trace;
           await wait(300,signal);
           const verified = await runRead('archive-identity', async laneSignal => {
             const response = await readResponse(PORTAL_HOME,AbortSignal.any([signal,laneSignal]));
@@ -302,7 +305,7 @@ export function startOfflineService(gate, diagnostics, debug) {
           if (verified.deferred) return;
           if (verified.result?.account !== account) throw Object.assign(new Error('The signed-in account changed. This list was not archived.'),{code:'ARCHIVE_DATA'});
           signal.throwIfAborted();
-          await recordedParse(due.periodRequest ? 'html-period' : 'html-index',{account,kind:due.kind,html:outcome.result,url,period});
+          await recordedParse(due.periodRequest ? 'html-period' : 'html-index',{account,kind:due.kind,html:outcome.result,url,period},sourceTrace);
         } else {
           if (due.kind !== 'products') throw Object.assign(new Error('This section does not have a verified signed-in archive reader.'),{code:'ARCHIVE_DATA'});
           await wait(300,signal);
@@ -316,6 +319,7 @@ export function startOfflineService(gate, diagnostics, debug) {
             }
           });
           if (outcome.deferred) return;
+          const sourceTrace = trace;
           await wait(300,signal);
           const verified = await runRead('archive-identity', async laneSignal => {
             const response = await readResponse(PORTAL_HOME,AbortSignal.any([signal,laneSignal]));
@@ -324,7 +328,7 @@ export function startOfflineService(gate, diagnostics, debug) {
           if (verified.deferred) return;
           if (verified.result?.account !== account) throw Object.assign(new Error('The signed-in account changed. This list was not archived.'),{code:'ARCHIVE_DATA'});
           signal.throwIfAborted();
-          await recordedParse('index', {account, kind:due.kind, text:outcome.result});
+          await recordedParse('index', {account, kind:due.kind, text:outcome.result},sourceTrace);
         }
         pendingIndex = null;
       }

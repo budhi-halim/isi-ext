@@ -2,13 +2,13 @@
   "schema": 1,
   "extensions": {
     "workspace": {
-      "version": "1.4.73"
+      "version": "1.4.74"
     },
     "revenue": {
-      "version": "1.1.13"
+      "version": "1.1.14"
     },
     "feedback": {
-      "version": "1.1.12"
+      "version": "1.1.13"
     }
   }
 }

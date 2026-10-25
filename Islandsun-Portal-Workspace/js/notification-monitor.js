@@ -9,6 +9,18 @@ import { diagnosticLog } from './diagnostic-log.js';
 import { OFFLINE_STATUS, PORTAL_HOME } from './offline-config.js';
 import { nextNotificationRead, previewQueue } from './monitor-schedule.js';
 
+const READ_PAUSE_REASONS = Object.freeze({
+  PORTAL_OFFLINE: 'offline',
+  PORTAL_EDITOR_OPEN: 'editor',
+  PORTAL_READ_COOLDOWN: 'recovery',
+  PORTAL_AUTH_REDIRECT: 'recovery',
+  ACCOUNT_CHANGED: 'signed-out',
+});
+
+function readPauseReason(error) {
+  return error.name === 'AbortError' ? 'navigation' : READ_PAUSE_REASONS[error.code];
+}
+
 /** Persist the current schedule so page changes and browser restarts do not restart discovery. */
 export function createNotificationMonitor(store, repository, notices, accountName, {
   readIndex = readMonitorIndex, readRecord = readMonitoredRecord, acquireLock = acquireLocalLock,
@@ -84,7 +96,7 @@ export function createNotificationMonitor(store, repository, notices, accountNam
       diagnosticLog('monitor-observed',{kind:record.kind,number:record.number,purpose,statusChanged:!!changed,documents});
       return true;
     } catch (error) {
-      if (signal.aborted || error.code === 'NOTIFICATION_STORAGE' || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
+      if (signal.aborted || readPauseReason(error) || error.code === 'NOTIFICATION_STORAGE' || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
       const failures = (memory.checked[key]?.failures || 0) + 1;
       const delay = Math.min(2*3600000,60000*2**Math.min(failures-1,7));
       memory.checked[key] = {...memory.checked[key],failures,retryKind:stage,retrySignature:signature,retryAt:Date.now()+delay};
@@ -186,7 +198,13 @@ export function createNotificationMonitor(store, repository, notices, accountNam
       retry = 15000; activity.pause('idle'); schedule(5000);
     } catch (error) {
       if (!signal.aborted && !disposed) {
-        if (error.message === 'session' || /session has expired/i.test(error.message)) {
+        const paused = readPauseReason(error);
+        if (paused) {
+          const delay = paused === 'offline' || paused === 'signed-out' ? 60000 : 15000;
+          activity.pause(paused,Date.now()+delay);
+          diagnosticLog('monitor-deferred',{reason:paused,code:error.code,retryAt:Date.now()+delay});
+          schedule(delay);
+        } else if (error.message === 'session' || /session has expired/i.test(error.message)) {
           notices.notify('Your portal session expired. Sign in again.',{key:'portal-sign-in',tone:'warning',href:`${PORTAL_HOME}login`}); activity.pause('signed-out',Date.now()+60000); schedule(60000);
         } else { activity.pause(error.code === 'NOTIFICATION_STORAGE' ? 'notification-storage' : 'retry',Date.now()+retry); diagnosticLog('monitor-paused',{errorType:error.name,code:error.code,message:String(error.message).slice(0,500),localRetry:!!pendingObservation,retryAt:Date.now()+retry}); schedule(retry); retry = Math.min(retry*2,120000); }
       }
