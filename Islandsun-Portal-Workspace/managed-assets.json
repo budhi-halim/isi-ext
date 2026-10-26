@@ -1,5 +1,5 @@
 {
-  "familyVersion": "1.3.18",
+  "familyVersion": "1.3.19",
   "files": {
     "js/shared/document-dom.js": "3cacc3c9a93276bea9ff096ca36e3253a3fe924974ea4490e8544509830a56ad",
     "js/shared/document-names.js": "f0e833ff36f0f027b38e93d56420d3a380425ee442d831221a1fb6f372083a04",
@@ -8,7 +8,7 @@
     "js/shared/update-popup.js": "dcc74e567b3f7dc8010040102c5324fefdf9db370b5b56fede0b1038b376f75a",
     "js/shared/update-service.js": "7c1d752af6e95c8a77bcc725f5813d6bfea734c088130f3e458df3535fa46547",
     "assets/family/css/tokens.css": "7f73bce96aae349045b8a9101229c0c00e6f6f48d48eea53c5bf10c3f2870948",
-    "assets/family/css/components.css": "5e5824b3361eeb6ba7be9b2908be8e4ee1d6b52341bd9e6b5ac46e3a10196889",
+    "assets/family/css/components.css": "36e5a617dc62e8e3f8cb9fd1c5f99f8126d02033e7b2b1f1d13f4d2dc8b2e34e",
     "assets/family/css/notifications.css": "4b0460bb3af1e4e7a8d0aae58e35010326dda8096b52b80672696d72448c70d9",
     "assets/family/css/theme-control.css": "7ac14f2525f2d54017222e2064d464c298e8bdc3c8710740564fdda5f9679aa8",
     "assets/family/css/extension-popup.css": "5891b83923d6082f7c76c525b9b017dc679c9d5201ce54f2cc14bed6ce11b293",

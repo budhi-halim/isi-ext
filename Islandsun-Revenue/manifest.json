@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "IslandSun Revenue Extractor",
-  "version": "1.1.14",
+  "version": "1.1.15",
   "description": "Automated data extraction tool for Delivery and Sales Orders.",
   "action": {
     "default_popup": "popup.html",
