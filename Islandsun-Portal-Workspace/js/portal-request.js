@@ -1,3 +1,4 @@
+import { rebasePortalUrl } from './shared/portal-address.js';
 import { portalUrl } from './shared/document-names.js';
 import { isTirSourceUrl } from './tir-source-logic.js';
 import { recordConnectionDiagnostic } from './connection-diagnostics.js';
@@ -113,6 +114,8 @@ function acquireRead(signal, priority, editorLookup, purpose, url) {
 /** Keep a record's dependent reads together so another record cannot replace portal session state. */
 export async function withPortalRead(task, { signal, priority = false, editorLookup, purpose = priority ? 'hover' : 'notification', reason, url } = {}) {
   listen();
+  if (editorLookup) editorLookup = rebasePortalUrl(editorLookup);
+  if (url) url = rebasePortalUrl(url);
   signal = signal ? AbortSignal.any([signal, lifecycle.signal]) : lifecycle.signal;
   if (editorLookup && !isTirSourceUrl(editorLookup)) throw new Error('This request link is unavailable.');
   const permit = await acquireRead(signal, priority, editorLookup, purpose, url || editorLookup);
@@ -123,6 +126,7 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
   async function read(url, { signal: _signal, priority: _priority, editorLookup: _lookup, purpose:_purpose, reason:_reason, url:_url, binary = false, maxBytes, requestNumber, ...options } = {}) {
     permit.assertAvailable();
     if (!portalUrl(String(url))) throw new Error('This portal link is unavailable.');
+    url = rebasePortalUrl(String(url));
     if (editorLookup && (String(url) !== editorLookup || (options.method && options.method !== 'GET'))) throw new Error('This request link is unavailable.');
     transactionSignal.throwIfAborted();
     if (previousRead) await new Promise((resolve, reject) => {

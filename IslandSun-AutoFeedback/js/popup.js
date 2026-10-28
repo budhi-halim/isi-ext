@@ -1,12 +1,14 @@
+import { DEFAULT_PORTAL_ORIGIN, portalOrigin, selectPortalTab } from './shared/portal-address.js';
 import { initializeUpdatePopup } from './shared/update-popup.js';
 initializeUpdatePopup('feedback');
 import { initializeTheme } from '../assets/family/js/theme.js';
-import { checkSession, LOGIN_URL } from '../assets/family/js/extension-session.js';
+import { checkSession } from './shared/portal-session.js';
 import { ACTIVE_STATES, DEFAULT_SETTINGS, validateSettings } from './logic.js';
 
 initializeTheme();
 const find = id => document.getElementById(id);
 let controller = null;
+let selectedOrigin = DEFAULT_PORTAL_ORIGIN;
 let generation = 0;
 let starting = false;
 let currentJob = null;
@@ -69,7 +71,10 @@ async function checkConnection() {
   showError();
   renderConnection('checking');
   try {
-    await checkSession(controller.signal);
+    const origin = portalOrigin((await selectPortalTab(chrome.tabs))?.url) || DEFAULT_PORTAL_ORIGIN;
+    if (ticket !== generation) return;
+    selectedOrigin = origin;
+    await checkSession(controller.signal, origin);
     if (ticket === generation) renderConnection('ready');
   } catch (error) {
     if (ticket === generation && error.name !== 'AbortError') renderConnection(error.name === 'SessionExpiredError' ? 'out' : 'error');
@@ -86,11 +91,11 @@ find('settings-form').addEventListener('submit', async event => {
   starting = true;
   find('start-button').disabled = true;
   find('start-button').textContent = 'Starting…';
-  try { const reply = await send('FEEDBACK_START', { settings }); renderJob(reply.job); }
+  try { const reply = await send('FEEDBACK_START', { settings, origin:selectedOrigin }); renderJob(reply.job); }
   catch (error) { showError(error.message); }
   finally { starting = false; find('start-button').disabled = false; find('start-button').textContent = 'Start AutoFeedback'; }
 });
-find('login-button').addEventListener('click', () => { void chrome.tabs.create({ url: LOGIN_URL }); });
+find('login-button').addEventListener('click', () => { void chrome.tabs.create({ url: `${selectedOrigin}/islandsun/index.php/login/` }); });
 find('retry-button').addEventListener('click', checkConnection);
 find('restart-button').addEventListener('click', () => { renderJob(null); void checkConnection(); });
 find('open-job').addEventListener('click', () => { void send('FEEDBACK_OPEN').catch(error => showError(error.message)); });

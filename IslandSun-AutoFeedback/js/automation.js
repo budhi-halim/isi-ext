@@ -1,4 +1,4 @@
-import { fetchPortal, readPortalItems, sampleListUrl, localDate, PORTAL_ROOT, SessionExpiredError } from '../assets/family/js/extension-session.js';
+import { fetchPortal, readPortalItems, sampleListUrl, localDate, PORTAL_ROOT, SessionExpiredError } from './shared/portal-session.js';
 import { selectRequests, requestId } from './logic.js';
 
 export function pause(milliseconds, signal) {

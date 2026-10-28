@@ -42,6 +42,7 @@ export function install() {
       return false;
     }
     if (message.action !== 'FEEDBACK_START') return false;
+    if (message.origin && message.origin !== location.origin) { respond({ok:false,message:'The company page changed. Check your connection again.'}); return false; }
     if (job && ACTIVE_STATES.has(job.state)) { respond({ ok: job.id === message.id, id: job.id, message: 'Feedback is already running in this tab.' }); return false; }
     let settings;
     try { settings = validateSettings(message.settings); } catch (error) { respond({ ok: false, message: error.message }); return false; }

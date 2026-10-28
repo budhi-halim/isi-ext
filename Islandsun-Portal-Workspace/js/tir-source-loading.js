@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81'
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)
     || !/^\/islandsun\/(?:index\.php\/)?master\/tir(?:\/|$)/i.test(location.pathname)) return;
 
   let installed = false, sequence = 0;

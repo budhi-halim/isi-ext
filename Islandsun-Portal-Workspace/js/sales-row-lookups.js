@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   const cache = new Map();
   let installed = false, generation = 0;
   // These three native column reads contain only an order ID, never a business mutation.

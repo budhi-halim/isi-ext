@@ -1,19 +1,21 @@
+import { DEFAULT_PORTAL_ORIGIN, PORTAL_MATCHES, portalOrigin } from './shared/portal-address.js';
 import { readAccountSettings, accountSettingsChanged } from './account-settings.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { connectionFailure } from './connection-diagnostics.js';
 export const SESSION_KEY = 'islandsun.session-keepalive';
 export const SESSION_ALARM = 'islandsun-session-keepalive';
 export const SESSION_INTERVAL = 5 * 60000;
-const PORTAL_ROOT = 'http://apps.islandsunindonesia.com:81/islandsun/';
 
 /** Refresh only the existing protected home session; never enter credentials or a record editor. */
-export async function refreshSession(signal, fetcher = fetch) {
-  const response = await fetcher(PORTAL_ROOT, { credentials: 'include', cache: 'no-store', redirect: 'manual', signal });
+export async function refreshSession(signal, fetcher = fetch, origin = DEFAULT_PORTAL_ORIGIN) {
+  if (portalOrigin(origin) !== origin) throw new TypeError('Unsupported portal address.');
+  const root = `${origin}/islandsun/`;
+  const response = await fetcher(root, { credentials: 'include', cache: 'no-store', redirect: 'manual', signal });
   try {
     if (response.type === 'opaqueredirect' || response.status >= 300 && response.status < 400) throw Object.assign(new Error('The portal session check redirected.'),{code:'SESSION_REDIRECT',status:response.status});
-    const destination = new URL(response.url || PORTAL_ROOT);
+    const destination = new URL(response.url || root);
     if ([401,403].includes(response.status) || /\/login(?:\/|$)/i.test(destination.pathname)) return 'signed-out';
-    if (!response.ok || destination.origin !== new URL(PORTAL_ROOT).origin || !destination.pathname.startsWith('/islandsun/')) {
+    if (!response.ok || destination.origin !== origin || !destination.pathname.startsWith('/islandsun/')) {
       throw Object.assign(new Error('The portal session check is unavailable.'),{status:response.status});
     }
     // Consume no dashboard data. Cancel the response body to release its connection promptly.
@@ -73,7 +75,12 @@ export function startSessionKeepAlive(gate, diagnostics, debug) {
   const service = createSessionKeepAlive({
     storage: chrome.storage,
     readSettings: async () => { const value = await readAccountSettings(); return {...value,keepSessionAlive:Boolean(value.account) && value.keepSessionAlive}; },
-    check: signal=>refreshSession(signal,debug ? (url,options)=>debug.fetch(url,options,{kind:'session-check',timeoutMs:8000}) : fetch),
+    check: async signal => {
+      const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
+      signal.throwIfAborted();
+      return refreshSession(signal,debug ? (url,options)=>debug.fetch(url,options,{kind:'session-check',timeoutMs:8000}) : fetch,
+        portalOrigin(scope?.origin) || DEFAULT_PORTAL_ORIGIN);
+    },
     runCheck: check => gate.runSessionCheck(async () => {
       const started = Date.now();
       const record = (outcome,status = 0) => diagnostics?.append({kind:'session-check',outcome,status,durationMs:Date.now()-started}).catch(() => {});
@@ -88,9 +95,11 @@ export function startSessionKeepAlive(gate, diagnostics, debug) {
       }
     }),
     pulse: async () => {
-      const tabs = await chrome.tabs.query({url:'http://apps.islandsunindonesia.com/islandsun/*'});
+      const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
+      const origin = portalOrigin(scope?.origin) || DEFAULT_PORTAL_ORIGIN;
+      const tabs = await chrome.tabs.query({url:PORTAL_MATCHES});
       await Promise.allSettled(tabs.filter(tab=>{
-        try {return new URL(tab.url).origin===new URL(PORTAL_ROOT).origin;} catch {return false;}
+        try {return portalOrigin(tab.url)===origin;} catch {return false;}
       }).map(tab=>chrome.tabs.sendMessage(tab.id,{type:'portal-session-pulse'})));
     },
   });
@@ -107,7 +116,7 @@ export function startSessionKeepAlive(gate, diagnostics, debug) {
     if(area==='local' && accountSettingsChanged(changes)) {
       service.cancel();
       const scope = changes[ACCOUNT_SCOPE];
-      const reset = scope && scope.oldValue?.account !== scope.newValue?.account
+      const reset = scope && (scope.oldValue?.account !== scope.newValue?.account || scope.oldValue?.origin !== scope.newValue?.origin)
         ? chrome.storage.session.set({[SESSION_KEY]:{state:scope.newValue?.account ? 'waiting' : 'signed-out',nextCheck:0}})
         : Promise.resolve();
       reset.then(configure).catch(()=>{});
@@ -115,7 +124,7 @@ export function startSessionKeepAlive(gate, diagnostics, debug) {
   });
   chrome.runtime.onMessage.addListener((message,sender)=>{
     if(message?.type!=='portal-session-active') return;
-    try { if(new URL(sender.url).origin!==new URL(PORTAL_ROOT).origin) return; } catch {return;}
+    if (sender.id !== chrome.runtime.id || !portalOrigin(sender.url)) return;
     service.resume().catch(()=>{});
   });
   chrome.runtime.onStartup.addListener(()=>configure().catch(()=>{}));

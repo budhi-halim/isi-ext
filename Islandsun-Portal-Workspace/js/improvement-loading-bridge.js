@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   const route = location.pathname.toLowerCase().replace('/index.php/', '/');
   const query = new URLSearchParams(location.search);
   const source = route === '/islandsun/samplerequest/getimprovement' ? query.get('sr_id')

@@ -1,9 +1,11 @@
+import { DEFAULT_PORTAL_ORIGIN, rebasePortalUrl } from './shared/portal-address.js';
 import { fetchPortal, pause } from './portal.js';
 
-export async function discoverIndexes(signal, log) {
+export async function discoverIndexes(signal, log, origin = DEFAULT_PORTAL_ORIGIN) {
+  const root = rebasePortalUrl(`${DEFAULT_PORTAL_ORIGIN}/islandsun/`, origin);
   const fetch = url => fetchPortal(url, signal);
   log("Checking delivery records…", "info");
-  const doRes = await fetch("http://apps.islandsunindonesia.com:81/islandsun/NewDo/json");
+  const doRes = await fetch(`${root}NewDo/json`);
   const doJson = await doRes.json();
   const latestDO = Math.max(...doJson.data.map(item => parseInt(item.id, 10)));
   if (!Number.isSafeInteger(latestDO) || latestDO < 1) throw new Error("Invalid delivery index.");
@@ -16,7 +18,7 @@ export async function discoverIndexes(signal, log) {
   const now = new Date();
   const d2 = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 
-  const soUrl = `http://apps.islandsunindonesia.com:81/islandsun/sales-order/json?dari=${d1}&sampai=${d2}&status=&tipe=&srs_value=&orderData=`;
+  const soUrl = `${root}sales-order/json?dari=${d1}&sampai=${d2}&status=&tipe=&srs_value=&orderData=`;
   const soRes = await fetch(soUrl);
   const soJson = await soRes.json();
 
@@ -28,7 +30,7 @@ export async function discoverIndexes(signal, log) {
   let testId = maxSoIdFromJSON + 1;
 
   while(emptyCount < 5) {
-    const tRes = await fetch(`http://apps.islandsunindonesia.com:81/islandsun/sales-order/edit/${testId}`);
+    const tRes = await fetch(`${root}sales-order/edit/${testId}`);
     if (tRes.ok) {
       const tHtml = await tRes.text();
       if (tHtml.match(/\d+\/ISI\/[A-Z0-9]+\/[A-Z]+\/\d{4}/)) {

@@ -1,3 +1,4 @@
+import { DEFAULT_PORTAL_ORIGIN, portalOrigin, portalUrl, rebasePortalUrl } from './shared/portal-address.js';
 import { readAccountSettings, accountSettingsChanged } from './account-settings.js';
 import { OFFLINE_STATUS, OFFLINE_SOURCES, PORTAL_HOME, PRODUCT_SOURCE } from './offline-config.js';
 import { PAGED_SOURCES, beginIndexScan, indexPageRequest } from './offline-pagination.js';
@@ -90,6 +91,7 @@ export async function archiveResponse(url, signal, options = {}, fetcher = fetch
 /** Alarm slices persist every record independently, so worker suspension cannot lose progress. */
 export function startOfflineService(gate, diagnostics, debug) {
   let running = false, controller, pendingRecord, pendingNumber, pendingFingerprint, pendingIndex, runningAccount, deferredRead = false;
+  let runningOrigin = null;
   let deleting = false, completion = Promise.resolve(), finish, resumeNeeded = false;
   gate.onAvailable?.(() => { if (resumeNeeded && !running && !deleting) { resumeNeeded = false; void tick(); } });
   let statusWrites = Promise.resolve(), outageRevision = 0;
@@ -125,7 +127,7 @@ export function startOfflineService(gate, diagnostics, debug) {
   function readResponse(url, signal, options) {
     // Compound detail/document reads yield between responses as well as between jobs.
     if (gate.archivePaused?.(url === PORTAL_HOME,trace.kind)) throw new DOMException('Waiting for portal navigation.', 'AbortError');
-    return archiveResponse(url, signal, options,debug ? (target,init)=>debug.fetch(target,init,{...trace,timeoutMs:options?.timeoutMs || 25000}) : fetch);
+    return archiveResponse(rebasePortalUrl(url, runningOrigin || DEFAULT_PORTAL_ORIGIN), signal, options,debug ? (target,init)=>debug.fetch(target,init,{...trace,timeoutMs:options?.timeoutMs || 25000}) : fetch);
   }
   async function runRead(kind, read) {
     const jobId=crypto.randomUUID(),queuedAt=Date.now();
@@ -198,6 +200,9 @@ export function startOfflineService(gate, diagnostics, debug) {
     signal.addEventListener('abort',() => chrome.runtime.sendMessage({target:'offline-parser',operation:'cancel'}).catch(() => {}),{once:true});
     try {
       await status({attemptedAt:started});
+      const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
+      runningOrigin = portalOrigin(scope?.origin) || DEFAULT_PORTAL_ORIGIN;
+      signal.throwIfAborted();
       let settings = await readAccountSettings();
       const previous = (await chrome.storage.local.get(OFFLINE_STATUS))[OFFLINE_STATUS] || {};
       const recovering = previous.hadOutage || previous.state === 'offline';
@@ -208,15 +213,15 @@ export function startOfflineService(gate, diagnostics, debug) {
       });
       if (home.deferred) { await status({state:'waiting'}); return; }
       signal.throwIfAborted();
-      if (!home.result) { await setAccountScope('','',started); await status({state:'signed-out', account:'',name:'',checkedAt:Date.now()},probeRevision); return; }
+      if (!home.result) { await setAccountScope('','',started,runningOrigin); await status({state:'signed-out', account:'',name:'',checkedAt:Date.now()},probeRevision); return; }
       await status({...(settings.offlineArchive ? {} : {state:'paused'}),checkedAt:Date.now(),error:''},probeRevision);
       signal.throwIfAborted();
       checkingConnection = false;
       const identity = home.result, account = identity.account;
       runningAccount = account;
-      await setAccountScope(account,identity.name,started);
+      await setAccountScope(account,identity.name,started,runningOrigin);
       const activeScope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
-      if (activeScope?.account !== account) throw new DOMException('Account changed.','AbortError');
+      if (activeScope?.account !== account || activeScope?.origin !== runningOrigin) throw new DOMException('Account changed.','AbortError');
       signal.throwIfAborted();
       settings = await readAccountSettings();
       if (settings.account !== account || !settings.enabled || !settings.offlineArchive) return;
@@ -487,7 +492,7 @@ export function startOfflineService(gate, diagnostics, debug) {
       }
       else {
         if (error.code !== 'OFFLINE_LOCKED' && !reportedFailures.has(error)) await diagnostics?.append({kind:'archive-processing',outcome:connectionFailure(error),durationMs:Date.now()-started}).catch(() => {});
-        if (error.code === 'SIGNED_OUT') await setAccountScope('','',started);
+        if (error.code === 'SIGNED_OUT') await setAccountScope('','',started,runningOrigin);
         const failure = archiveFailure(error, checkingConnection);
         if (failure.state === 'offline') {
           outageRevision++; gate.setPortalOffline?.(true);
@@ -498,7 +503,7 @@ export function startOfflineService(gate, diagnostics, debug) {
       controller = null; pendingRecord = null; pendingNumber = null; pendingFingerprint = null; pendingIndex = null; runningAccount = null;
       await Promise.allSettled([...observations]);
       if (!observations.size) await closeParser();
-      running = false;
+      running = false; runningOrigin = null;
       finish();
     }
   }
@@ -522,7 +527,9 @@ export function startOfflineService(gate, diagnostics, debug) {
   });
   chrome.storage.onChanged.addListener((changes,area) => {
     if (area !== 'local') return;
-    if (changes[ACCOUNT_SCOPE] && runningAccount && changes[ACCOUNT_SCOPE].newValue?.account !== runningAccount) controller?.abort();
+    const scope = changes[ACCOUNT_SCOPE];
+    if (scope && (runningAccount && scope.newValue?.account !== runningAccount
+      || runningOrigin && (portalOrigin(scope.newValue?.origin) || DEFAULT_PORTAL_ORIGIN) !== runningOrigin)) controller?.abort();
     if (accountSettingsChanged(changes)) {
       if (!changes[ACCOUNT_SCOPE] || changes[ACCOUNT_SCOPE].newValue?.account !== runningAccount) controller?.abort();
       configure().catch(() => {});
@@ -531,7 +538,7 @@ export function startOfflineService(gate, diagnostics, debug) {
   chrome.runtime.onMessage.addListener((message,sender,respond) => {
     if (message?.type === 'offline-observed-index') {
       const operation = (async () => {
-        if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !sender.url?.startsWith(PORTAL_HOME)
+        if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !portalUrl(sender.url)
           || !['sample','tir'].includes(message.kind) || typeof message.text !== 'string' || message.text.length > 8*1024*1024
           || !Number.isFinite(message.observedAt) || message.observedAt > Date.now() || Date.now()-message.observedAt > 120000) return false;
         const settings = await readAccountSettings();

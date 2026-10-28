@@ -1,13 +1,15 @@
+import { DEFAULT_PORTAL_ORIGIN, rebasePortalUrl } from './shared/portal-address.js';
 import { fetchPortal, pause } from './portal.js';
 import { createDateTrend } from './trend.js';
 import { extractData, getSoMagnitude } from './records.js';
 
-export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LATEST_DO_ID, latestSO: LATEST_SO_ID, signal, ui }) {
+export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LATEST_DO_ID, latestSO: LATEST_SO_ID, signal, ui, origin = DEFAULT_PORTAL_ORIGIN }) {
   const { setProgress, setPhaseState, log, waitForCompletion } = ui;
+  const root = rebasePortalUrl(`${DEFAULT_PORTAL_ORIGIN}/islandsun/`, origin);
   const fetch = url => fetchPortal(url, signal);
   const trend = createDateTrend();
-  const doBaseUrl = "http://apps.islandsunindonesia.com:81/islandsun/NewDo/detailDO/";
-  const soBaseUrl = "http://apps.islandsunindonesia.com:81/islandsun/sales-order/edit/";
+  const doBaseUrl = `${root}NewDo/detailDO/`;
+  const soBaseUrl = `${root}sales-order/edit/`;
 
   let [sYear, sMonth] = startMonthVal.split("-");
   let [eYear, eMonth] = endMonthVal.split("-");

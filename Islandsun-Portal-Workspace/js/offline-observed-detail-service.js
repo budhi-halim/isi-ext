@@ -1,4 +1,5 @@
-import { PORTAL_HOME, archiveKey } from './offline-config.js';
+import { portalOrigin, portalUrl } from './shared/portal-address.js';
+import { archiveKey } from './offline-config.js';
 import { readVisibleRecord, updateDetail, completeDetailCapture } from './offline-store.js';
 import { saveDetailSource } from './offline-source-store.js';
 import { DETAIL_PARSER_REVISION } from './offline-parser-version.js';
@@ -7,7 +8,7 @@ import { CAPTURE_LIMITS } from './debug-capture-data.js';
 function recordIdentity(value) {
   try {
     const url = new URL(value);
-    if (url.origin !== new URL(PORTAL_HOME).origin) return null;
+    if (!portalOrigin(url.href)) return null;
     const tir = url.pathname.match(/^\/islandsun\/master\/tir\/edit\/([1-9]\d*)$/i);
     if (tir) return {kind:'tir',id:tir[1],type:null};
     if (!/^\/islandsun\/samplerequest\/edit$/i.test(url.pathname)
@@ -20,7 +21,8 @@ function recordIdentity(value) {
 /** Archive successful preview responses off the live page; stale or partial results cannot replace complete details. */
 export async function retainObservedDetail(message, sender, {readSettings, parse, canContinue}) {
   const identity = recordIdentity(message.url);
-  if (!identity || sender.id !== chrome.runtime.id || !sender.url?.startsWith(PORTAL_HOME)
+  if (!identity || sender.id !== chrome.runtime.id || !portalUrl(sender.url)
+    || portalOrigin(message.url) !== portalOrigin(sender.url)
     || !message.account || typeof message.html !== 'string' || !message.html
     || message.html.length > CAPTURE_LIMITS.responseBytes
     || message.supplementary !== null && typeof message.supplementary !== 'string'

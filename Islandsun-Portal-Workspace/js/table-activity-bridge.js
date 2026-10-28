@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   let port, retry, busy = false, interactionPort, interactionUntil = 0, interactionTimer, interactionRetry;
   const reads = new Map();
   const respond = (id,granted) => document.dispatchEvent(new CustomEvent('islandsun-table-read-response',{detail:{id,granted}}));

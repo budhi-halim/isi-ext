@@ -1,3 +1,4 @@
+import { portalOrigin } from './shared/portal-address.js';
 import { ensureVault, findVault, passwordMaterial, protectVault, restoreCapturedKey, vaultKey } from './offline-vault.js';
 import { migrateAccount } from './offline-store.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
@@ -22,7 +23,7 @@ export function startOfflineAuthentication() {
     if (message?.type !== 'offline-login-candidate' || sender.id !== chrome.runtime.id || !sender.tab?.id) return;
     try {
       const url = new URL(sender.url);
-      if (url.origin !== 'http://apps.islandsunindonesia.com:81' || !/^\/islandsun\/login(?:\/|$)/i.test(url.pathname)) return;
+      if (!portalOrigin(url.href) || !/^\/islandsun\/login(?:\/|$)/i.test(url.pathname)) return;
     } catch { return; }
     if (typeof message.username !== 'string' || !message.username.trim() || message.username.length > 200 || typeof message.password !== 'string' || !message.password.trim() || message.password.length > 4096) return;
     const tab = sender.tab.id;
@@ -35,7 +36,7 @@ export function startOfflineAuthentication() {
       const material = await passwordMaterial(message.password);
       const oldMaterial = existing?.password ? await passwordMaterial(message.password,existing.password.salt) : null;
       delete message.password;
-      await chrome.storage.session.set({[candidateKey(tab)]:{username,material,existingKey:oldMaterial?.key,createdAt:captured,documentId:sender.documentId}});
+      await chrome.storage.session.set({[candidateKey(tab)]:{username,material,existingKey:oldMaterial?.key,createdAt:captured,documentId:sender.documentId,origin:portalOrigin(sender.url)}});
     })();
     pending.set(tab,operation);
     operation.then(() => respond({ok:true}),() => respond({ok:false})).finally(() => { delete message.password; pending.delete(tab); });
@@ -70,7 +71,7 @@ async function authenticate(message, sender) {
   }
   if ((await chrome.storage.local.get({enabled:true})).enabled === false) return;
   await ensureVault(message.account,message.name);
-  const matches = candidate && Date.now() - candidate.createdAt < 300000 && candidate.username.toLowerCase() === message.account.toLowerCase() && subsequentDocument;
+  const matches = candidate && candidate.origin === portalOrigin(sender.url) && Date.now() - candidate.createdAt < 300000 && candidate.username.toLowerCase() === message.account.toLowerCase() && subsequentDocument;
   const samePassword = matches && await restoreCapturedKey(message.account,candidate.existingKey);
   let unlocked = false;
   try { await vaultKey(message.account); unlocked = true; }

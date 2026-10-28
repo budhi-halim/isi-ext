@@ -1,3 +1,4 @@
+import { portalOrigin } from './shared/portal-address.js';
 import { ARCHIVE_SCOPE_VERSION } from './offline-access.js';
 
 export const DIAGNOSTICS_KEY = 'islandsun.connection-diagnostics';
@@ -136,7 +137,7 @@ export function startConnectionDiagnostics({onEvent = () => {}} = {}) {
   }};
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type !== 'connection-diagnostic') return;
-    try { if (new URL(sender.url).origin !== 'http://apps.islandsunindonesia.com:81') return; }
+    try { if (!portalOrigin(sender.url)) return; }
     catch { return; }
     history.append(message.value).then(ok => respond({ok}), () => respond({ok:false}));
     return true;

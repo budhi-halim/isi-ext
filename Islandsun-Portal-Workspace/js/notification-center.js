@@ -9,15 +9,16 @@ import { silenceDescription } from './notification-types.js';
 import { createNotificationActions } from './notification-actions.js';
 import { diagnosticLog } from './diagnostic-log.js';
 import { notificationText } from './notification-text.js';
+import { rebasePortalUrl } from './shared/portal-address.js';
 
 function destination(item) {
   if (item.type === 'update' && item.url === UPDATE_PAGE) return UPDATE_PAGE;
   if (item.type === 'system' && item.url) {
-    try { const url = new URL(item.url); if (url.origin === location.origin && ['http:','https:'].includes(url.protocol)) return url.href; }
+    try { const url = new URL(rebasePortalUrl(item.url)); if (url.origin === location.origin && ['http:','https:'].includes(url.protocol)) return url.href; }
     catch { /* A stored message with no valid local destination stays plain text. */ }
   }
   const [kind,id] = String(item.key || '').split(':');
-  return submissionRecord({kind,id,number:item.number || 'Notification',url:item.url})?.url;
+  return submissionRecord({kind,id,number:item.number || 'Notification',url:rebasePortalUrl(item.url)})?.url;
 }
 
 function orderedNotices(state) {

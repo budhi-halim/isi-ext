@@ -1,3 +1,4 @@
+import { portalOrigin, rebasePortalUrl } from './shared/portal-address.js';
 import { PORTAL_HOME } from './offline-config.js';
 
 export const PRINT_LOGO = `${PORTAL_HOME}assets/print/img/islandsun%20semarang.png`;
@@ -10,7 +11,7 @@ export function deliveryPrintUrl(value, deliveryId) {
   try {
     const url = new URL(value,PORTAL_HOME);
     const match = url.pathname.match(/^\/islandsun\/NewDo\/printSoLogistic\/(\d+)\/(\d+)$/);
-    return url.origin === new URL(PORTAL_HOME).origin && !url.username && !url.password && !url.search && !url.hash && match?.[2] === String(deliveryId) ? url.href : null;
+    return portalOrigin(url.href) && !url.username && !url.password && !url.search && !url.hash && match?.[2] === String(deliveryId) ? rebasePortalUrl(url.href) : null;
   } catch { return null; }
 }
 
@@ -44,7 +45,7 @@ export function copyPrintSheet(sheet,url,logo = null) {
     if (node.nodeType === Node.TEXT_NODE) return output.createTextNode(node.textContent);
     if (node.nodeType !== Node.ELEMENT_NODE) return null;
     if (node.tagName === 'IMG') {
-      if (!logo || new URL(node.getAttribute('src'),url).href !== PRINT_LOGO) return null;
+      if (!logo || rebasePortalUrl(new URL(node.getAttribute('src'),url).href) !== PRINT_LOGO) return null;
       const image = output.createElement('img'); image.src = logo; image.alt = 'Islandsun Indonesia'; return image;
     }
     if (!TAGS.has(node.tagName)) return null;

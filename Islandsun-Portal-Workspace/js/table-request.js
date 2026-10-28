@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   const prototype = XMLHttpRequest.prototype;
   const nativeOpen = prototype.open, nativeSend = prototype.send, nativeAbort = prototype.abort;
   const metadata = new WeakMap(), pending = new Map();

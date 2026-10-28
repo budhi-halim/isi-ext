@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "IslandSun Revenue Extractor",
-  "version": "1.1.15",
+  "version": "1.1.16",
   "description": "Automated data extraction tool for Delivery and Sales Orders.",
   "action": {
     "default_popup": "popup.html",
@@ -25,7 +25,8 @@
   ],
   "host_permissions": [
     "*://apps.islandsunindonesia.com/*",
-    "https://budhi-halim.github.io/*"
+    "https://budhi-halim.github.io/*",
+    "http://192.168.0.22/*"
   ],
   "background": {
     "service_worker": "js/background.js",

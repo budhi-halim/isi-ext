@@ -1,3 +1,4 @@
+import { portalOrigin, rebasePortalUrl } from './shared/portal-address.js';
 import { OFFLINE_SOURCES, businessDate, archiveKey, PORTAL_HOME } from './offline-config.js';
 import { requestDetailUrl, tirDetailUrl, sampleType, translateChrome } from './logic.js';
 import { availableDocuments } from './shared/document-dom.js';
@@ -71,6 +72,7 @@ export function normalizeIndex(account, kind, payload, {partial = false, include
 
 /** Native client-side tables already contain the full result in their signed-in HTML response. */
 export function parseHtmlRows(account,kind,html,url) {
+  url = rebasePortalUrl(url);
   const source = HTML_SOURCES[kind];
   const expected = source && new URL(source.path,PORTAL_HOME);
   const requested = new URL(url);
@@ -93,7 +95,7 @@ export function parseHtmlRows(account,kind,html,url) {
       values.stock_id = '';
       try {
         const target = anchor && new URL(anchor.getAttribute('href'),url);
-        if (target?.origin === new URL(PORTAL_HOME).origin) values.stock_id = target.pathname.match(/^\/islandsun\/StockCard\/AdjustmenAdd\/(\d+)\/?$/)?.[1] || '';
+        if (portalOrigin(target?.href)) values.stock_id = target.pathname.match(/^\/islandsun\/StockCard\/AdjustmenAdd\/(\d+)\/?$/)?.[1] || '';
       } catch { /* A malformed native identifier is omitted by the shared identity policy. */ }
     }
     if (source.columns.includes('related_orders')) {
@@ -116,6 +118,7 @@ export function parseHtmlIndex(account,kind,html,url,options) {
 
 /** Related-order fragments are validated and wrapped only in an inert detached document. */
 export function parseStockOrders(html,url,record) {
+  url = rebasePortalUrl(url);
   const source = OFFLINE_SOURCES[record?.kind], id = record?.fields?.related_order_id;
   if (!source?.stockRows || !/^\d+$/.test(id) || url !== `${PORTAL_HOME}StockCard/showSoData?srsc_id=${id}`) throw new Error('This sales-order lookup does not match the stock row.');
   const root = parse(`<table><tbody>${html}</tbody></table>`), table = root.querySelector('table');
@@ -124,7 +127,7 @@ export function parseStockOrders(html,url,record) {
   for (const row of rows) {
     const link = row.cells[1]?.querySelector('a[href]');
     const target = link && new URL(link.getAttribute('href'),url);
-    if (row.cells.length !== 6 || !target || target.origin !== new URL(PORTAL_HOME).origin || !/^\/islandsun\/sales-order\/edit\/\d+\/?$/i.test(target.pathname)) throw new Error('The related sales-order row was not recognized.');
+    if (row.cells.length !== 6 || !target || !portalOrigin(target.href) || !/^\/islandsun\/sales-order\/edit\/\d+\/?$/i.test(target.pathname)) throw new Error('The related sales-order row was not recognized.');
   }
   return {title:source.title,sections:[],documents:[],
     fields:source.columns.map(column => ({label:column.label,value:record.fields[column.key]})),
@@ -133,12 +136,13 @@ export function parseStockOrders(html,url,record) {
 
 /** Availability detail responses are fragments; their enclosing session is checked separately. */
 export function parseAvailabilityDetail(html,url,record) {
+  url = rebasePortalUrl(url);
   if (record?.kind !== 'availability' || url !== availabilityIdentity(record.fields).detailUrl) throw new Error('This availability detail does not match the saved record.');
   const root = parse(html);
   if (!root.querySelector('.table-detail')) throw new Error('The portal returned no saved availability details.');
   const stockIds = [...root.querySelectorAll('a[href]')].map(anchor => {
     const link = new URL(anchor.getAttribute('href'),url);
-    return link.origin === new URL(PORTAL_HOME).origin ? link.pathname.match(/^\/islandsun\/stock-request\/detail-srs\/(\d+)$/i)?.[1] : null;
+    return portalOrigin(link.href) ? link.pathname.match(/^\/islandsun\/stock-request\/detail-srs\/(\d+)$/i)?.[1] : null;
   }).filter(Boolean);
   if (!stockIds.includes(record.fields.source_stock_id)) throw new Error('The availability detail refers to a different Stock Request.');
   const main = root.createElement('div'); main.className = 'content-wrapper';
@@ -208,7 +212,7 @@ function previousSampleReference(main, sectionFor) {
       const field = {label:'Previous SR',value,section:sectionFor(label)};
       if (target.tagName === 'A') {
         const route = new URL(target.href);
-        if (route.origin === new URL(PORTAL_HOME).origin
+        if (portalOrigin(route.href)
           && /^\/islandsun\/(?:index\.php\/)?samplerequest\/edit$/i.test(route.pathname)
           && /^[1-9]\d*$/.test(route.searchParams.get('id') || '')) {
           field.reference = {kind:'sample',id:route.searchParams.get('id')};

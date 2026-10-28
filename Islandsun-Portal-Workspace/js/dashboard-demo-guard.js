@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   const WIDGETS = '.connectedSortable,.todo-list,.textarea,.daterange,.knob,#world-map,#sparkline-1,#sparkline-2,#sparkline-3,#calendar,#chat-box,#revenue-chart,#line-chart,#sales-chart';
   const events = new AbortController();
   function waitForPreference() {

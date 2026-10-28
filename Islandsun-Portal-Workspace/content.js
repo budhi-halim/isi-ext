@@ -1,5 +1,5 @@
 // The manifest installs the stylesheet before the first paint without blocking native content.
-if (location.origin === 'http://apps.islandsunindonesia.com:81') {
+if (['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) {
   document.addEventListener('submit',event => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement) || new URL(form.action).pathname !== '/islandsun/login/act_login') return;

@@ -1,13 +1,13 @@
-import { PORTAL_ORIGIN } from './shared/document-names.js';
+import { DEFAULT_PORTAL_ORIGIN, ALTERNATIVE_PORTAL_ORIGIN, portalOrigin } from './shared/portal-address.js';
 
-const PORTAL_HOST = new URL(PORTAL_ORIGIN).hostname;
-const FILTER = {urls:[`*://${PORTAL_HOST}/*`], types:['main_frame']};
+const PORTAL_HOST = new URL(DEFAULT_PORTAL_ORIGIN).hostname;
+const FILTER = {urls:[`*://${PORTAL_HOST}/*`, `http://${new URL(ALTERNATIVE_PORTAL_ORIGIN).hostname}/*`], types:['main_frame']};
 const requestKey = tabId => `islandsun.offline-navigation:${tabId}`;
 
 function portalAddress(value) {
   try {
     const url = new URL(value);
-    if (!['http:','https:'].includes(url.protocol) || url.hostname !== PORTAL_HOST || url.username || url.password) return null;
+    if (!['http:','https:'].includes(url.protocol) || url.hostname !== PORTAL_HOST && !portalOrigin(url.href) || url.username || url.password) return null;
     url.hash = '';
     return url.href;
   } catch { return null; }

@@ -1,5 +1,5 @@
 // Keep background detail reads away from native request editors and their working state.
-if (location.origin === 'http://apps.islandsunindonesia.com:81' && /\/(?:add|edit|create|update|getImprovement)[^/]*(?:\/|$)/i.test(location.pathname)) {
+if (['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin) && /\/(?:add|edit|create|update|getImprovement)[^/]*(?:\/|$)/i.test(location.pathname)) {
   let enabled = false, active = true, port, retry, version = 0;
   function release() { clearTimeout(retry); const previous = port; port = null; previous?.disconnect(); }
   function connect() {

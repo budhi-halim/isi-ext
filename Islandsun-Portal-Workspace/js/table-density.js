@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   const { pageSize } = window[Symbol.for('islandsun.table-density')];
   const tables = new Map();
   const requestStarts = new WeakMap();

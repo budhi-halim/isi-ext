@@ -1,4 +1,5 @@
-import { PORTAL_ORIGIN, downloadUrl, documentFilename } from './shared/document-names.js';
+import { portalOrigin, portalUrl, rebasePortalUrl } from './shared/portal-address.js';
+import { downloadUrl, documentFilename } from './shared/document-names.js';
 import { readAccountSettings } from './account-settings.js';
 import { readVisibleRecord, saveFile } from './offline-store.js';
 import { archiveKey } from './offline-config.js';
@@ -10,7 +11,7 @@ export function startTirDocumentService() {
     if (area === 'local' && (changes['islandsun.archive-reset'] || scope && scope.oldValue?.account !== scope.newValue?.account)) generation++;
   });
   chrome.runtime.onMessage.addListener((message,sender,respond) => {
-    if (message?.type !== 'tir-document-bytes' || sender.id !== chrome.runtime.id || sender.frameId !== 0 || !sender.url?.startsWith(`${PORTAL_ORIGIN}/islandsun/`)) return;
+    if (message?.type !== 'tir-document-bytes' || sender.id !== chrome.runtime.id || sender.frameId !== 0 || !portalUrl(sender.url)) return;
     (async () => {
       const current = generation;
       const settings = await readAccountSettings();
@@ -21,7 +22,7 @@ export function startTirDocumentService() {
       const match = new URL(message.record.url).pathname.match(/^\/islandsun\/master\/tir\/edit\/([1-9]\d*)$/i);
       if (!settings.enabled) fail('EXTENSION_DISABLED');
       if (!settings.account || message.account !== settings.account) fail('ACCOUNT_CHANGED');
-      if (!match || match[1] !== message.record.id || new URL(message.record.url).origin !== PORTAL_ORIGIN
+      if (!match || match[1] !== message.record.id || new URL(message.record.url).origin !== portalOrigin(sender.url)
         || !downloadUrl(message.document?.url) || typeof message.base64 !== 'string' || message.base64.length > Math.ceil(32*1024*1024/3)*4) throw new Error('Invalid document observation');
       const bytes = Uint8Array.from(atob(message.base64),value=>value.charCodeAt(0));
       const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(value=>value.toString(16).padStart(2,'0')).join('');
@@ -30,9 +31,10 @@ export function startTirDocumentService() {
         try {
           const record = await readVisibleRecord(archiveKey(settings.account,'tir',match[1]),settings.account,'tir');
           const latest = await readAccountSettings();
-          if (latest.account === settings.account && record?.detail?.documents.some(document => document.url === message.document.url)) {
+          const document = record?.detail?.documents.find(document => rebasePortalUrl(document.url) === rebasePortalUrl(message.document.url));
+          if (latest.account === settings.account && document) {
             const blob = new Blob([bytes],{type:String(message.mime || '').slice(0,100)});
-            saved = await saveFile(record,{url:message.document.url,label:message.document.label,blob,savedAt:Date.now(),filename:documentFilename(message.document.label,'',blob.type)},{shouldContinue:() => current === generation});
+            saved = await saveFile(record,{url:document.url,label:document.label,blob,savedAt:Date.now(),filename:documentFilename(document.label,'',blob.type)},{shouldContinue:() => current === generation});
           }
         } catch { /* A locked archive does not prevent independent document notifications. */ }
       }

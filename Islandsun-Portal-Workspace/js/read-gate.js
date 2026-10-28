@@ -1,4 +1,4 @@
-import { PORTAL_ORIGIN } from './shared/document-names.js';
+import { portalOrigin } from './shared/portal-address.js';
 import { isTirSourceUrl } from './tir-source-logic.js';
 import { watchPortalNavigation } from './navigation-readiness.js';
 import { safeRequestUrl } from './debug-capture-data.js';
@@ -12,7 +12,7 @@ function recoveryDelay(elapsed) {
 
 function editorSafeArchive(kind) { return kind === 'archive-identity' || /^archive-[a-z-]+-(?:index|document)$/.test(kind); }
 function listReader(url) {
-  try { const target = new URL(url); return target.origin === PORTAL_ORIGIN && /^\/islandsun\/(?:samplerequest|master\/tir)\/json$/i.test(target.pathname); }
+  try { const target = new URL(url); return portalOrigin(target.href) && /^\/islandsun\/(?:samplerequest|master\/tir)\/json$/i.test(target.pathname); }
   catch { return false; }
 }
 
@@ -108,7 +108,7 @@ export function startReadGate({onEvent = () => {}} = {}) {
 
   chrome.runtime.onConnect.addListener(port => {
     if (!['islandsun-read-gate', 'islandsun-editor-guard','islandsun-table-guard','islandsun-table-read','islandsun-interaction-guard','islandsun-action-guard'].includes(port.name)) return;
-    try { if (new URL(port.sender?.url).origin !== PORTAL_ORIGIN) return port.disconnect(); }
+    try { if (!portalOrigin(port.sender?.url)) return port.disconnect(); }
     catch { return port.disconnect(); }
     if (port.name === 'islandsun-interaction-guard' || port.name === 'islandsun-action-guard') {
       const action = port.name === 'islandsun-action-guard';
@@ -187,7 +187,7 @@ export function startReadGate({onEvent = () => {}} = {}) {
 
   chrome.runtime.onMessage?.addListener((message,sender) => {
     if (message?.type !== 'portal-read-promote' || !['hover','visible'].includes(message.purpose)) return;
-    try { if (new URL(sender.url).origin !== PORTAL_ORIGIN || new URL(message.url).origin !== PORTAL_ORIGIN) return; }
+    try { if (!portalOrigin(sender.url) || new URL(message.url).origin !== new URL(sender.url).origin) return; }
     catch { return; }
     const url = safeRequestUrl(message.url);
     for (const job of queue) if (job.url === url && !job.nativeTable) {

@@ -1,3 +1,4 @@
+import { rebasePortalUrl } from './shared/portal-address.js';
 import { PORTAL_HOME } from './offline-config.js';
 import { HTML_SOURCES } from './offline-html-sources.js';
 import { parseIdentity, parseHtmlRows, normalizeIndex } from './offline-parser.js';
@@ -8,10 +9,11 @@ import { sourcePeriods, periodCoverage } from './offline-periods.js';
 
 /** Discover native periods separately; a blank default table is never a complete archive. */
 export function parseSourcePeriods(account,kind,html,url) {
+  url = rebasePortalUrl(url);
   const source = HTML_SOURCES[kind], expected = source && new URL(source.path,PORTAL_HOME).href;
   if (!source?.periodic || url!==expected || parseIdentity(html)?.account!==account) throw new Error('The signed-in reporting source changed.');
   const root = new DOMParser().parseFromString(html,'text/html');
-  const form = [...root.forms].find(form=>new URL(form.getAttribute('action'),url).href===expected && form.method.toLowerCase()==='get');
+  const form = [...root.forms].find(form=>rebasePortalUrl(new URL(form.getAttribute('action'),url).href)===expected && form.method.toLowerCase()==='get');
   const values = name=>[...form?.querySelector(`select[name="${name}"]`)?.options || []].map(option=>option.value).filter(Boolean);
   return sourcePeriods(values('tahun'),values('bulan'));
 }

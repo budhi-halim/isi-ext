@@ -1,3 +1,4 @@
+import { portalOrigin, rebasePortalUrl } from './shared/portal-address.js';
 import { PORTAL_HOME } from './offline-config.js';
 import { copyPrintSheet, printSheetFile } from './offline-print.js';
 
@@ -8,9 +9,9 @@ const SHEET_TITLES = new Set(['SAMPLE REQUEST FORM', 'NEW PRODUCT DEVELOPMENT RE
 /** Accept only the native print link for the exact saved sample and request type. */
 export function samplePrintUrl(value,detailUrl) {
   try {
-    const detail = new URL(detailUrl,PORTAL_HOME), target = new URL(value,PORTAL_HOME);
+    const detail = new URL(detailUrl,PORTAL_HOME), target = new URL(rebasePortalUrl(new URL(value,detail).href, detail.origin));
     const id = detail.searchParams.get('id'), type = detail.searchParams.get('srtype');
-    if (detail.origin !== new URL(PORTAL_HOME).origin || !/^\/islandsun\/(?:index\.php\/)?samplerequest\/edit$/i.test(detail.pathname)
+    if (!portalOrigin(detail.href) || !/^\/islandsun\/(?:index\.php\/)?samplerequest\/edit$/i.test(detail.pathname)
       || !/^\d+$/.test(id) || !/^[1-5]$/.test(type)) return null;
     return target.origin === detail.origin && !target.username && !target.password && !target.search && !target.hash
       && target.pathname === `/islandsun/Samplerequest/PrintPdfSampleRequest/${id}/${type}` ? target.href : null;

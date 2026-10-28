@@ -1,12 +1,6 @@
-export const PORTAL_ORIGIN = 'http://apps.islandsunindonesia.com:81';
+import { PORTAL_ORIGIN, portalUrl } from './portal-address.js';
+export { PORTAL_ORIGIN, portalUrl } from './portal-address.js';
 export const LOGIN_URL = `${PORTAL_ORIGIN}/islandsun/login`;
-
-export function portalUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.origin === PORTAL_ORIGIN && !url.username && !url.password && url.pathname.startsWith('/islandsun/') ? url : null;
-  } catch { return null; }
-}
 
 export function downloadUrl(value) {
   const url = portalUrl(value);

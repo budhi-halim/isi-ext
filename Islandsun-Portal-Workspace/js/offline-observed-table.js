@@ -1,4 +1,4 @@
-import { PORTAL_HOME } from './offline-config.js';
+import { portalOrigin } from './shared/portal-address.js';
 
 export const OBSERVED_TABLE_LIMIT = 512 * 1024;
 
@@ -7,7 +7,7 @@ export function observedSampleIdentity(value) {
   try {
     const url = new URL(value);
     const id = url.searchParams.get('id'), sampleType = url.searchParams.get('srtype');
-    if (url.origin !== new URL(PORTAL_HOME).origin
+    if (!portalOrigin(url.href)
       || !/^\/islandsun\/(?:index\.php\/)?samplerequest\/edit\/?$/i.test(url.pathname)
       || !/^[1-9]\d*$/.test(id || '') || !['2','3','5'].includes(sampleType)) return null;
     return {id, sampleType};

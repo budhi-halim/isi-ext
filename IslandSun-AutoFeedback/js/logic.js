@@ -1,3 +1,4 @@
+import { portalOrigin } from './shared/portal-address.js';
 export const DEFAULT_SETTINGS = Object.freeze({ days: 180, komentar: 'Not ok', saran: 'Drop' });
 export const ACTIVE_STATES = new Set(['starting', 'running', 'cancelling']);
 
@@ -27,6 +28,6 @@ export function requestId(value) {
 export function isCompanyWorkspace(url) {
   try {
     const parsed = new URL(url);
-    return parsed.origin === 'http://apps.islandsunindonesia.com:81' && parsed.pathname.startsWith('/islandsun/') && !/\/login(?:\/|$)/i.test(parsed.pathname);
+    return Boolean(portalOrigin(parsed.href)) && parsed.pathname.startsWith('/islandsun/') && !/\/login(?:\/|$)/i.test(parsed.pathname);
   } catch { return false; }
 }

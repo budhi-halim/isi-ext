@@ -1,3 +1,4 @@
+import { portalOrigin } from './shared/portal-address.js';
 import { PORTAL_ORIGIN } from './shared/document-names.js';
 
 export function tirSourceUrl(type, id) {
@@ -9,7 +10,7 @@ export function tirSourceUrl(type, id) {
 export function isTirSourceUrl(value) {
   try {
     const url = new URL(value);
-    return url.origin === PORTAL_ORIGIN && !url.search && !url.hash
+    return Boolean(portalOrigin(url.href)) && !url.search && !url.hash
       && /^\/islandsun\/master\/Tir\/(?:getprd|getprdStok)\/\/[1-9]\d{0,11}$/.test(url.pathname);
   } catch { return false; }
 }

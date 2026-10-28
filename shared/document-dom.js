@@ -1,9 +1,12 @@
+import { PORTAL_ORIGIN, rebasePortalUrl } from './portal-address.js';
 import { downloadUrl, documentParts } from './document-names.js';
 
 export function availableDocuments(root) {
   const found = new Map();
   for (const anchor of root.querySelectorAll('a[href]')) {
-    const url = downloadUrl(anchor.href || anchor.getAttribute('href'));
+    let url;
+    try { url = downloadUrl(rebasePortalUrl(new URL(anchor.getAttribute('href') || anchor.href, `${PORTAL_ORIGIN}/islandsun/`).href)); }
+    catch { continue; }
     if (!url) continue;
     const container = anchor.closest('[id^="addfile"]');
     const label = container?.querySelector('label')?.textContent?.trim();

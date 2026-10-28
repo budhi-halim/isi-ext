@@ -1,8 +1,8 @@
+import { portalUrl } from './shared/portal-address.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { safeRequestUrl, safeRequestBody, captureResponseBody, responseHeaders, capturedText, CAPTURE_LIMITS } from './debug-capture-data.js';
 import { appendJournal, diagnosticFields } from './diagnostic-journal-store.js';
 
-const PORTAL='http://apps.islandsunindonesia.com:81';
 
 /** Passive instrumentation: capture only requests the application already decided to make. */
 export function startDebugCapture() {
@@ -56,19 +56,19 @@ export function startDebugCapture() {
   }
   chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     if (message?.type === 'diagnostic-event') {
-      const ownPage = sender.id === chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL('')) || sender.url?.startsWith(`${PORTAL}/islandsun/`));
+      const ownPage = sender.id === chrome.runtime.id && (sender.url?.startsWith(chrome.runtime.getURL('')) || portalUrl(sender.url));
       if (!ownPage || typeof message.event !== 'string' || !/^[a-z][a-z0-9-]{0,79}$/.test(message.event)) return;
       note(message.event,{...diagnosticFields(message.fields || {}),tabId:sender.tab?.id}).then(()=>respond({ok:true}),()=>respond({ok:false}));
       return true;
     }
     if (['debug-portal-start','debug-portal-event','debug-portal-processing'].includes(message?.type)) {
-      if (sender.id!==chrome.runtime.id || !sender.tab || !sender.url?.startsWith(`${PORTAL}/islandsun/`)) return;
+      if (sender.id!==chrome.runtime.id || !sender.tab || !portalUrl(sender.url)) return;
       (async()=>{
         const session=await captureContext();
         if (!session) return {};
         const context={initiator:'extension-content-script',tabId:sender.tab.id};
         const validUrl=value=>{
-          try {const url=new URL(value);return url.origin===PORTAL && url.pathname.startsWith('/islandsun/');}
+          try {const url=new URL(value);return portalUrl(url.href);}
           catch {return false;}
         };
         if (message.type==='debug-portal-start') {

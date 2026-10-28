@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Islandsun Portal Workspace",
-  "version": "1.4.75",
+  "version": "1.4.76",
   "description": "An Islandsun workspace with product previews, document downloads, notifications, and a protected offline copy.",
   "permissions": [
     "downloads",
@@ -13,7 +13,8 @@
   "host_permissions": [
     "http://apps.islandsunindonesia.com/*",
     "https://apps.islandsunindonesia.com/*",
-    "https://budhi-halim.github.io/*"
+    "https://budhi-halim.github.io/*",
+    "http://192.168.0.22/*"
   ],
   "background": {
     "service_worker": "js/background.js",
@@ -35,7 +36,8 @@
   "content_scripts": [
     {
       "matches": [
-        "http://apps.islandsunindonesia.com/islandsun/*"
+        "http://apps.islandsunindonesia.com/islandsun/*",
+        "http://192.168.0.22/islandsun/*"
       ],
       "js": [
         "js/dashboard-demo-guard.js",
@@ -62,7 +64,8 @@
     },
     {
       "matches": [
-        "http://apps.islandsunindonesia.com/islandsun/*"
+        "http://apps.islandsunindonesia.com/islandsun/*",
+        "http://192.168.0.22/islandsun/*"
       ],
       "js": [
         "js/navigation-transition.js",
@@ -91,7 +94,8 @@
         "assets/family/assets/icons/*.svg"
       ],
       "matches": [
-        "http://apps.islandsunindonesia.com/*"
+        "http://apps.islandsunindonesia.com/*",
+        "http://192.168.0.22/*"
       ]
     }
   ],

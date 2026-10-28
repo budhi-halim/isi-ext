@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   const requests = new Set();
   let active = false, jquery, scanTimer, idleTimer, quietUntil = 0, announced = '', interactionUntil = 0;
 

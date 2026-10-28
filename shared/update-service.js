@@ -1,3 +1,4 @@
+import { portalUrl } from './portal-address.js';
 import { UPDATE_KEY, UPDATE_FEED, CHECK_INTERVAL, emptyUpdateState, parseUpdateFeed, familyInventory, reconcileUpdates, compareVersions } from './update-logic.js';
 
 const ALARM = 'islandsun-version-check';
@@ -94,7 +95,7 @@ export function startUpdateService({ key, discoverFamily = false, api = chrome, 
     if (sender.id !== api.runtime.id) return false;
     try {
       const url = new URL(sender.url || sender.tab?.url);
-      return url.origin === new URL(api.runtime.getURL('')).origin || (discoverFamily && url.origin === 'http://apps.islandsunindonesia.com:81' && url.pathname.startsWith('/islandsun/'));
+      return url.origin === new URL(api.runtime.getURL('')).origin || (discoverFamily && portalUrl(url.href));
     } catch { return false; }
   }
   async function handle(message, sender) {

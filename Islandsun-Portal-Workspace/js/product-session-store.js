@@ -1,4 +1,4 @@
-import { PORTAL_ORIGIN } from './shared/document-names.js';
+import { portalOrigin } from './shared/portal-address.js';
 import { isTirSourceUrl } from './tir-source-logic.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { recordKind } from './fetch-policy.js';
@@ -10,7 +10,7 @@ export async function clearProductSessions(account = null) { await serviceStore?
 function validUrl(value) {
   try {
     const url = new URL(value);
-    return url.origin === PORTAL_ORIGIN && (isTirSourceUrl(value)
+    return portalOrigin(url.href) && (isTirSourceUrl(value)
       || /^\/islandsun\/master\/tir\/edit\/\d+$/i.test(url.pathname)
       || (/^\/islandsun\/samplerequest\/edit$/i.test(url.pathname) && /^\d+$/.test(url.searchParams.get('id')) && /^[1-5]$/.test(url.searchParams.get('srtype'))));
   } catch { return false; }
@@ -98,7 +98,7 @@ export function startProductSessionService() {
   serviceStore = store;
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!['product-cache-read', 'product-cache-write'].includes(message?.type)) return;
-    try { if (new URL(sender.url).origin !== PORTAL_ORIGIN) return; } catch { return; }
+    try { if (!portalOrigin(sender.url)) return; } catch { return; }
     if (typeof message.account !== 'string' || !message.account || message.account.length > 200) return;
     const operation = (async () => {
       const scope = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];

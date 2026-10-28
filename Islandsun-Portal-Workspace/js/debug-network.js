@@ -1,13 +1,14 @@
+import { portalOrigin, PORTAL_MATCHES } from './shared/portal-address.js';
 import { safeRequestUrl } from './debug-capture-data.js';
 
 /** Observe portal transport lifecycle only; no blocking listeners, headers or request bodies. */
 export function startDebugNetwork(debug, webRequest=chrome.webRequest) {
   if (!webRequest) return;
-  const filter={urls:['http://apps.islandsunindonesia.com/islandsun/*']};
+  const filter={urls:PORTAL_MATCHES};
   const observe = event => details => {
     if (!debug.recording()) return;
     try {
-      if (new URL(details.url).origin!=='http://apps.islandsunindonesia.com:81') return;
+      if (!portalOrigin(details.url)) return;
       const fields={browserRequestId:details.requestId,observedAt:details.timeStamp,url:safeRequestUrl(details.url),resourceType:details.type,method:details.method,tabId:details.tabId,frameId:details.frameId};
       if (Number.isInteger(details.statusCode)) fields.status=details.statusCode;
       if (details.redirectUrl) fields.redirectUrl=safeRequestUrl(details.redirectUrl);

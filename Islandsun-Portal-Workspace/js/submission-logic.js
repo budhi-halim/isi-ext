@@ -1,4 +1,4 @@
-import { PORTAL_ORIGIN } from './shared/document-names.js';
+import { portalOrigin, rebasePortalUrl } from './shared/portal-address.js';
 import { requestDetailUrl, tirDetailUrl } from './logic.js';
 import { discardRecordNotices, pruneNotificationState } from './notification-relevance.js';
 import { notificationMuteKey } from './notification-types.js';
@@ -40,8 +40,9 @@ export function submissionRecord(value) {
   if (!number || number.length > 100 || /[\x00-\x1f]/.test(number)) return null;
   let url;
   try { url = new URL(value.url); } catch { return null; }
-  const canonical = value.kind === 'tir' ? tirDetailUrl(value.id) : requestDetailUrl(value.id, url.searchParams.get('srtype'));
-  if (url.origin !== PORTAL_ORIGIN || url.href !== canonical) return null;
+  if (!portalOrigin(url.href)) return null;
+  const canonical = rebasePortalUrl(value.kind === 'tir' ? tirDetailUrl(value.id) : requestDetailUrl(value.id, url.searchParams.get('srtype')), url.origin);
+  if (url.href !== canonical) return null;
   return { kind: value.kind, id: String(value.id), number, url: canonical, ...(value.customer ? {customer:String(value.customer).trim().slice(0, 300)} : {}) };
 }
 
@@ -49,16 +50,16 @@ export function submissionRecord(value) {
 export function submissionIntent(href, pageUrl, number) {
   let action, page;
   try { action = new URL(href, pageUrl); page = new URL(pageUrl); } catch { return null; }
-  if (action.origin !== PORTAL_ORIGIN || page.origin !== PORTAL_ORIGIN || action.hash) return null;
+  if (!portalOrigin(page.href) || action.origin !== page.origin || action.hash) return null;
   page.pathname = page.pathname.replace(/^\/islandsun\/index\.php\//i, '/islandsun/');
   const tir = /^\/islandsun\/master\/Tir\/ajukan\/([1-9]\d{0,11})\/processPM$/i.exec(action.pathname);
   if (tir && !action.search && page.pathname.toLowerCase() === `/islandsun/master/tir/edit/${tir[1]}`) {
-    return submissionRecord({ kind: 'tir', id: tir[1], number, url: tirDetailUrl(tir[1]) });
+    return submissionRecord({ kind: 'tir', id: tir[1], number, url: rebasePortalUrl(tirDetailUrl(tir[1]), page.origin) });
   }
   const sample = /^\/islandsun\/samplerequest\/updateStatus\/([1-9]\d{0,11})$/i.exec(action.pathname);
   if (sample && [...action.searchParams.keys()].length === 1 && normalizedStatus(action.searchParams.get('status')) === 'WAITING APPROVAL PM'
     && /^\/islandsun\/samplerequest\/edit$/i.test(page.pathname) && page.searchParams.get('id') === sample[1]) {
-    return submissionRecord({ kind: 'sample', id: sample[1], number, url: requestDetailUrl(sample[1], page.searchParams.get('srtype')) });
+    return submissionRecord({ kind: 'sample', id: sample[1], number, url: rebasePortalUrl(requestDetailUrl(sample[1], page.searchParams.get('srtype')), page.origin) });
   }
   return null;
 }

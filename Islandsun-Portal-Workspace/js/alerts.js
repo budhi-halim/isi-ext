@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   const nativeAlert = window.alert.bind(window);
   const nativeConfirm = window.confirm.bind(window);
   let pendingSave = null, allowance = null, sequence = 0;

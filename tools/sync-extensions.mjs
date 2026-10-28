@@ -14,7 +14,7 @@ for (const name of familyFiles) files.set(`assets/family/${name}`, await readFil
 const hash = value => createHash('sha256').update(value).digest('hex');
 const version = JSON.parse(await readFile(path.join(family, 'family-manifest.json'), 'utf8')).version;
 for (const target of targets) {
-  const targetFiles = new Map([...files].filter(([name]) => target === 'Islandsun-Portal-Workspace' || name.startsWith('js/shared/update-')));
+  const targetFiles = new Map([...files].filter(([name]) => target === 'Islandsun-Portal-Workspace' || name.startsWith('js/shared/update-') || name.startsWith('js/shared/portal-')));
   targetFiles.set('css/update-popup.css', await readFile(path.join(root, 'shared/update-popup.css')));
   const manifest = `${JSON.stringify({ familyVersion: version, files: Object.fromEntries([...targetFiles].map(([name, value]) => [name, hash(value)])) }, null, 2)}\n`;
   const directory = path.join(root, target);

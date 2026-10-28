@@ -1,4 +1,5 @@
-import { checkSession, PORTAL_ROOT } from '../assets/family/js/extension-session.js';
+import { DEFAULT_PORTAL_ORIGIN, portalOrigin, selectPortalTab } from './shared/portal-address.js';
+import { checkSession } from './shared/portal-session.js';
 import { ACTIVE_STATES, isCompanyWorkspace, validateSettings } from './logic.js';
 
 class FeedbackError extends Error {
@@ -31,13 +32,13 @@ export function createCoordinator(api, { authenticate = checkSession, wait = mil
     return save({ ...job, state: 'interrupted', message: 'The company page was closed or reloaded. Check saved feedback before starting again.' });
   }
 
-  async function waitForContent(tabId) {
+  async function waitForContent(tabId, origin) {
     const started = Date.now();
     let injected = false;
     while (Date.now() - started < readyTimeout) {
       const tab = await api.tabs.get(tabId);
       if (tab.status === 'complete') {
-        if (!isCompanyWorkspace(tab.url)) throw new FeedbackError('The company page did not open correctly. Sign in and try again.');
+        if (!isCompanyWorkspace(tab.url) || portalOrigin(tab.url) !== origin) throw new FeedbackError('The company page did not open correctly. Sign in and try again.');
         try {
           const reply = await api.tabs.sendMessage(tabId, { action: 'FEEDBACK_PING' });
           if (reply?.ready) return;
@@ -52,19 +53,22 @@ export function createCoordinator(api, { authenticate = checkSession, wait = mil
     throw new FeedbackError('The company page took too long to become ready. Retry when it finishes loading.');
   }
 
-  async function launch(settings) {
+  async function launch(settings, requestedOrigin) {
     const previous = await reconcile();
     if (previous && ACTIVE_STATES.has(previous.state)) return { ok: true, job: previous };
-    await authenticate();
+    const selected = await selectPortalTab(api.tabs);
+    const origin = portalOrigin(selected?.url) || DEFAULT_PORTAL_ORIGIN;
+    if (requestedOrigin && requestedOrigin !== origin) throw new FeedbackError('The company page changed. Check your connection again.');
+    await authenticate(undefined, origin);
     await api.storage.local.set(settings);
-    const tabs = await api.tabs.query({ url: '*://apps.islandsunindonesia.com/*' });
-    const existing = tabs.find(tab => isCompanyWorkspace(tab.url) && tab.status === 'complete');
-    const tab = existing || await api.tabs.create({ url: PORTAL_ROOT, active: false });
-    const job = { id: crypto.randomUUID(), tabId: tab.id, state: 'starting', message: 'Preparing the company page…', completed: 0, total: 0 };
+    const existing = selected && isCompanyWorkspace(selected.url) ? selected : null;
+    if (!existing && origin !== DEFAULT_PORTAL_ORIGIN) throw new FeedbackError('Sign in to the company page and try again.');
+    const tab = existing || await api.tabs.create({ url: `${DEFAULT_PORTAL_ORIGIN}/islandsun/`, active: false });
+    const job = { id: crypto.randomUUID(), tabId: tab.id, origin, state: 'starting', message: 'Preparing the company page…', completed: 0, total: 0 };
     await save(job, { replace: true });
     try {
-      await waitForContent(tab.id);
-      const reply = await api.tabs.sendMessage(tab.id, { action: 'FEEDBACK_START', id: job.id, settings });
+      await waitForContent(tab.id, origin);
+      const reply = await api.tabs.sendMessage(tab.id, { action: 'FEEDBACK_START', id: job.id, settings, origin });
       if (!reply?.ok || reply.id !== job.id) throw new FeedbackError(reply?.message || 'The company page did not acknowledge startup.');
       // Content owns the state after acknowledgement; never overwrite an early completion.
       return { ok: true, job: await getJob() };
@@ -94,7 +98,7 @@ export function createCoordinator(api, { authenticate = checkSession, wait = mil
       const previous = await reconcile();
       if (previous && ACTIVE_STATES.has(previous.state)) return { ok: true, job: previous };
       if (startPromise) return startPromise;
-      startPromise = launch(settings);
+      startPromise = launch(settings, message.origin);
       try { return await startPromise; } finally { startPromise = null; }
     }
     if (message.action === 'FEEDBACK_CANCEL') {

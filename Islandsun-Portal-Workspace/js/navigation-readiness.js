@@ -1,4 +1,4 @@
-import { PORTAL_ORIGIN } from './shared/document-names.js';
+import { portalOrigin, PORTAL_MATCHES } from './shared/portal-address.js';
 
 /** Pause optional reads while any portal tab is loading its native page. */
 export function watchPortalNavigation(tabs, changed, webRequest) {
@@ -13,7 +13,7 @@ export function watchPortalNavigation(tabs, changed, webRequest) {
   function isPortal(tab) {
     try {
       const url = new URL(tab?.url);
-      return url.origin === PORTAL_ORIGIN && /^\/islandsun(?:\/|$)/i.test(url.pathname);
+      return portalOrigin(url.href) && /^\/islandsun(?:\/|$)/i.test(url.pathname);
     } catch { return false; }
   }
   function update(id, info, tab) {
@@ -35,7 +35,7 @@ export function watchPortalNavigation(tabs, changed, webRequest) {
   });
   // Tab status can remain complete until response headers arrive. Track the
   // provisional request independently so keepalive cannot enter that gap.
-  const filter = {urls:['http://apps.islandsunindonesia.com/islandsun/*'], types:['main_frame']};
+  const filter = {urls:PORTAL_MATCHES, types:['main_frame']};
   function requestStarted(details) {
     if (details.tabId < 0 || details.type !== 'main_frame' || !isPortal(details)) return;
     const previous = requests.get(details.tabId);
@@ -60,8 +60,7 @@ export function watchPortalNavigation(tabs, changed, webRequest) {
     // fall outside this listener's host scope and must release it here.
     if (!isPortal({url:details.redirectUrl})) requestEnded(details);
   }, filter);
-  const portal = new URL(PORTAL_ORIGIN);
-  if (tabs?.query) tabs.query({url:`${portal.protocol}//${portal.hostname}/islandsun/*`}).then(list => {
+  if (tabs?.query) tabs.query({url:PORTAL_MATCHES}).then(list => {
     for (const tab of list) {
       if (!observed.has(tab.id) && (isPortal(tab) && tab.status === 'loading' || isPortal({url:tab.pendingUrl}))) loading.add(tab.id);
     }

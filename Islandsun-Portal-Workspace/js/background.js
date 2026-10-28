@@ -1,3 +1,4 @@
+import { portalOrigin } from './shared/portal-address.js';
 import { startAccountSettings } from './account-settings.js';
 startAccountSettings();
 import { startUpdateService } from './shared/update-service.js';
@@ -32,7 +33,7 @@ startTirDocumentService();
 const locks = new Map();
 chrome.runtime.onConnect.addListener(port => {
   if (port.name !== 'islandsun-local-lock') return;
-  try { if (new URL(port.sender?.url).origin !== 'http://apps.islandsunindonesia.com:81') return port.disconnect(); }
+  try { if (!portalOrigin(port.sender?.url)) return port.disconnect(); }
   catch { return port.disconnect(); }
   let lockKey;
   port.onMessage.addListener(message => {

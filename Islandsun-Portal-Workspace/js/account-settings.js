@@ -17,7 +17,8 @@ export async function readAccountSettings(storage = chrome.storage.local) {
 }
 
 export function accountSettingsChanged(changes) {
-  return Boolean(changes.enabled || changes[ACCOUNT_SCOPE] && changes[ACCOUNT_SCOPE].oldValue?.account !== changes[ACCOUNT_SCOPE].newValue?.account
+  return Boolean(changes.enabled || changes[ACCOUNT_SCOPE] && (changes[ACCOUNT_SCOPE].oldValue?.account !== changes[ACCOUNT_SCOPE].newValue?.account
+    || changes[ACCOUNT_SCOPE].oldValue?.origin !== changes[ACCOUNT_SCOPE].newValue?.origin)
     || Object.keys(changes).some(key => key.startsWith(ACCOUNT_SETTINGS_PREFIX)));
 }
 

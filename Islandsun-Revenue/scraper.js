@@ -1,3 +1,4 @@
+import { DEFAULT_PORTAL_ORIGIN, portalOrigin, selectPortalTab } from './js/shared/portal-address.js';
 import { initializeTheme } from './assets/family/js/theme.js';
 import { createRevenueUI } from './js/ui.js';
 import { validateMonths } from './js/validation.js';
@@ -8,6 +9,7 @@ import { downloadBlob } from './js/download.js';
 
 const find = id => document.getElementById(id);
 const ui = createRevenueUI();
+const requestedOrigin = portalOrigin(new URL(location.href).searchParams.get('portal'));
 initializeTheme({ toggle: find('theme-toggle') });
 let controller = null;
 let runNumber = 0;
@@ -60,8 +62,10 @@ async function startProcess(event) {
   ui.reset();
   ui.setRunning(true);
   try {
-    const indexes = await discoverIndexes(controller.signal, ui.log);
-    const data = await runCoreScraper({ startMonthVal, endMonthVal, ...indexes, signal: controller.signal, ui });
+    const origin = requestedOrigin || portalOrigin((await selectPortalTab(chrome.tabs))?.url) || DEFAULT_PORTAL_ORIGIN;
+    controller.signal.throwIfAborted();
+    const indexes = await discoverIndexes(controller.signal, ui.log, origin);
+    const data = await runCoreScraper({ startMonthVal, endMonthVal, ...indexes, signal: controller.signal, ui, origin });
     if (!data.length) {
       ui.log('No revenue rows were found for the selected months.', 'warn');
       return;

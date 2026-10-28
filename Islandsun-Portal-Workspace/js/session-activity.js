@@ -1,5 +1,5 @@
 (() => {
-  if (location.origin !== 'http://apps.islandsunindonesia.com:81') return;
+  if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   let last = 0;
   // The portal only watches window.onscroll; scrolling an inner table never reaches it.
   // Forward real input to its existing reset handler without changing the 30-minute timeout.
