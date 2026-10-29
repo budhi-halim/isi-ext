@@ -118,7 +118,11 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         if (release) { restoreRequired = true; previewCacheChecked = false; }
       }
       if (!releaseLeadership) { activity.pause('other-tab'); schedule(5000); return; }
-      if (restoreRequired) { memory = store.read().monitor || memory; restoreRequired = false; }
+      if (restoreRequired) {
+        await store.refresh?.();
+        signal.throwIfAborted();
+        memory = store.read().monitor || memory; restoreRequired = false;
+      }
       await retainPending(signal);
       await store.advanceReminders?.();
       if (!memory.indexedAt || Date.now()-memory.indexedAt >= INDEX_FRESH_MS) {

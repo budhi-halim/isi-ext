@@ -4,6 +4,8 @@ Portal Workspace, Revenue Extractor and AutoFeedback for desktop Chrome and Edge
 
 The default portal is `http://apps.islandsunindonesia.com:81`. All three extensions also accept `http://192.168.0.22:81` when the user opens it. Page actions, session checks and background offline capture use that selected session; neither connection failures nor default launch links switch to the IP address. Workspace still opens its saved offline copy when the domain fails. Archive ownership remains account based across both addresses.
 
+Workspace notification history, silence settings, popup preferences and monitoring progress also share one account-scoped extension store across both addresses and all portal tabs. Existing website histories are imported once without replaying queued popups. Retained diagnostic records of confirmed Silence and Dismiss actions can restore those choices even while the old address is unavailable. Native Save and Submit tracking keeps a synchronous navigation outbox until the extension confirms storage.
+
 Runtime sources stay in the three named extension folders. Load a folder containing `manifest.json` as an unpacked extension for local development. Keep that path stable to retain the extension's local settings and saved offline copies.
 
 Shared design assets come from the sibling `isi/family` package. Synchronize them with `node ../isi/family-tools/sync.mjs`, then `node tools/sync-extensions.mjs`. The tools reject conflicting local changes. Regenerate the update feed with `node tools/extension-versions.mjs` after changing extension versions.

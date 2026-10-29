@@ -103,10 +103,18 @@ async function start() {
     const trackingFailure = operation => error => diagnosticLog('notification-tracking-failed', { operation, errorType:error.name, message:String(error.message).slice(0,500) });
     submissions = createSubmissionTracking(store, trackingFailure('submission'));
     saves = createSavedRequestTracking(store, trackingFailure('save'), savedNavigation.capture);
-    combinedStore = withUpdateNotifications(store, {onError:trackingFailure('updates')});
-    center = createNotificationCenter(combinedStore, notices);
-    const accountName = document.querySelector('.user-menu > a')?.textContent.trim().replace(/\s+/g, ' ');
-    monitor = createNotificationMonitor(store, repository, notices, accountName);
+    store.ready.then(() => {
+      if (current !== generation || accountPaused) return;
+      combinedStore = withUpdateNotifications(store, {onError:trackingFailure('updates')});
+      center = createNotificationCenter(combinedStore, notices);
+      const accountName = document.querySelector('.user-menu > a')?.textContent.trim().replace(/\s+/g, ' ');
+      monitor = createNotificationMonitor(store, repository, notices, accountName);
+    }).catch(error => {
+      if (current !== generation || accountPaused) return;
+      monitor?.destroy(); center?.destroy(); combinedStore?.destroy();
+      trackingFailure('history')(error);
+      notices.notify('Notification history could not be loaded. Refresh this page to try again.', {key:'notification-history',tone:'error'});
+    });
   }
   chrome.storage.onChanged.addListener(accountChanged);
   chrome.storage.local.get(ACCOUNT_SCOPE).then(saved => checkAccount(saved[ACCOUNT_SCOPE])).catch(() => {});

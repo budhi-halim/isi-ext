@@ -178,6 +178,14 @@ export function clearJournal(account = null, {onProgress = () => {}} = {}) {
   });
 }
 
+/** Read only confirmed notification actions for migration; encrypted response bodies stay untouched. */
+export async function notificationJournalActions(account) {
+  await writes;
+  const db = await database();
+  const rows = await result(db.transaction('incidents').objectStore('incidents').index('account').getAll(account));
+  return rows.filter(row => row.event === 'notification-action-saved' && row.account === account);
+}
+
 async function recount(db) {
   const transaction = db.transaction(['events', 'bodies', 'incidents', 'meta'], 'readwrite'), done = completed(transaction);
   const usage = { events: 0, incidents:0, bytes: 0, discardedEvents: 0, discardedBodies: 0, discardedIncidents:0 };

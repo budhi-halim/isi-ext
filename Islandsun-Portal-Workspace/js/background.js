@@ -6,6 +6,7 @@ startUpdateService({ key: 'workspace', discoverFamily: true });
 import { startDownloadService } from './shared/download-service.js';
 import { startReadGate } from './read-gate.js';
 import { startProductSessionService } from './product-session-store.js';
+import { startNotificationService } from './notification-service.js';
 import { startTirDocumentService } from './tir-document-service.js';
 import { startConnectionDiagnostics } from './connection-diagnostics.js';
 import { startSessionKeepAlive } from './session-keepalive.js';
@@ -28,6 +29,7 @@ startSessionKeepAlive(readGate, connectionDiagnostics, debugCapture);
 const offlineService = startOfflineService(readGate, connectionDiagnostics, debugCapture);
 startOfflineFallback(chrome,{onUnavailable:offlineService.unavailable});
 startProductSessionService();
+startNotificationService();
 startTirDocumentService();
 
 const locks = new Map();
