@@ -1,15 +1,15 @@
 import { DEFAULT_PORTAL_ORIGIN, rebasePortalUrl } from './shared/portal-address.js';
-import { fetchPortal, pause } from './portal.js';
+import { fetchPortal, pause, readPortalItems, readRecord } from './portal.js';
 
 export async function discoverIndexes(signal, log, origin = DEFAULT_PORTAL_ORIGIN) {
   const root = rebasePortalUrl(`${DEFAULT_PORTAL_ORIGIN}/islandsun/`, origin);
   const fetch = url => fetchPortal(url, signal);
   log("Checking delivery records…", "info");
   const doRes = await fetch(`${root}NewDo/json`);
-  const doJson = await doRes.json();
-  const latestDO = Math.max(...doJson.data.map(item => parseInt(item.id, 10)));
+  const deliveries = await readPortalItems(doRes);
+  const latestDO = Math.max(...deliveries.map(item => Number(item.id)));
   if (!Number.isSafeInteger(latestDO) || latestDO < 1) throw new Error("Invalid delivery index.");
-  log(`✓ Logic synced (Index: ${latestDO})`, "success");
+  log('Delivery records ready.', 'success');
 
   log("Locating the latest sales order…", "info");
   const thirtyDaysAgo = new Date();
@@ -20,9 +20,9 @@ export async function discoverIndexes(signal, log, origin = DEFAULT_PORTAL_ORIGI
 
   const soUrl = `${root}sales-order/json?dari=${d1}&sampai=${d2}&status=&tipe=&srs_value=&orderData=`;
   const soRes = await fetch(soUrl);
-  const soJson = await soRes.json();
+  const sales = await readPortalItems(soRes);
 
-  const maxSoIdFromJSON = soJson.data && soJson.data.length > 0 ? Math.max(...soJson.data.map(item => parseInt(item.so_id, 10))) : 20000;
+  const maxSoIdFromJSON = sales.length > 0 ? Math.max(...sales.map(item => Number(item.so_id))) : 20000;
   if (!Number.isSafeInteger(maxSoIdFromJSON) || maxSoIdFromJSON < 1) throw new Error('Invalid sales index.');
 
   let latestSO = maxSoIdFromJSON;
@@ -32,7 +32,7 @@ export async function discoverIndexes(signal, log, origin = DEFAULT_PORTAL_ORIGI
   while(emptyCount < 5) {
     const tRes = await fetch(`${root}sales-order/edit/${testId}`);
     if (tRes.ok) {
-      const tHtml = await tRes.text();
+      const tHtml = await readRecord(tRes);
       if (tHtml.match(/\d+\/ISI\/[A-Z0-9]+\/[A-Z]+\/\d{4}/)) {
         latestSO = testId;
         emptyCount = 0;
@@ -41,7 +41,7 @@ export async function discoverIndexes(signal, log, origin = DEFAULT_PORTAL_ORIGI
     testId++;
     await pause(150, signal);
   }
-  log(`✓ Secondary matrix synced (Index: ${latestSO})`, "success");
+  log('Sales orders ready.', 'success');
 
   return { latestDO, latestSO };
 }

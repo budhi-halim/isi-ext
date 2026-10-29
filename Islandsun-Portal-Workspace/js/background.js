@@ -1,8 +1,6 @@
 import { portalOrigin } from './shared/portal-address.js';
 import { startAccountSettings } from './account-settings.js';
-startAccountSettings();
 import { startUpdateService } from './shared/update-service.js';
-startUpdateService({ key: 'workspace', discoverFamily: true });
 import { startDownloadService } from './shared/download-service.js';
 import { startReadGate } from './read-gate.js';
 import { startProductSessionService } from './product-session-store.js';
@@ -17,6 +15,9 @@ import { startCaptureCleanup } from './debug-capture-store.js';
 import { startDebugNetwork } from './debug-network.js';
 import { startAccountScope } from './account-scope.js';
 import { startOfflineAuthentication, observePortalAuthentication } from './offline-auth-service.js';
+startNotificationService();
+startAccountSettings();
+startUpdateService({ key: 'workspace', discoverFamily: true });
 startOfflineAuthentication();
 startAccountScope({observeAuthentication:observePortalAuthentication});
 startDownloadService();
@@ -29,7 +30,6 @@ startSessionKeepAlive(readGate, connectionDiagnostics, debugCapture);
 const offlineService = startOfflineService(readGate, connectionDiagnostics, debugCapture);
 startOfflineFallback(chrome,{onUnavailable:offlineService.unavailable});
 startProductSessionService();
-startNotificationService();
 startTirDocumentService();
 
 const locks = new Map();

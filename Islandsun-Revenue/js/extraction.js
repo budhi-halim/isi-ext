@@ -1,5 +1,5 @@
 import { DEFAULT_PORTAL_ORIGIN, rebasePortalUrl } from './shared/portal-address.js';
-import { fetchPortal, pause } from './portal.js';
+import { fetchPortal, pause, readRecord } from './portal.js';
 import { createDateTrend } from './trend.js';
 import { extractData, getSoMagnitude } from './records.js';
 
@@ -29,7 +29,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
 
   setProgress(0, true);
   setPhaseState(1);
-  log(`[PHASE 1] Scanning delivery records (${targetStartDate} to ${targetEndDate})`, "info");
+  log(`Reading deliveries from ${targetStartDate} to ${targetEndDate}.`, 'info');
 
   let currentDelay = 400;
   const MIN_DELAY = 100, MAX_DELAY = 30000;
@@ -66,7 +66,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
     try {
       const res = await dynamicFetch(doBaseUrl + currentDO);
       if (res.ok) {
-        const html = await res.text();
+        const html = await readRecord(res);
         const doc = new DOMParser().parseFromString(html, "text/html");
         const dateEl = doc.querySelector('#do_tgl_kirim');
 
@@ -87,7 +87,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
             historicalStreak = 0;
           } else if (tgl >= targetStartDate && tgl <= targetEndDate) {
             historicalStreak = 0;
-            log(`  ✓ Target acquired on ${tgl}`, "success");
+            log(`Delivery found for ${tgl}.`, 'success');
             const links = doc.querySelectorAll('#detail_srf a');
             links.forEach(link => {
               const text = link.innerText.trim();
@@ -95,12 +95,12 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
             });
           } else if (tgl > safetyNetDate && tgl < targetStartDate) {
             historicalStreak = 0;
-            const printToConsole = (currentDO % 15 === 0);
-            log(`  Scanning historical records to verify completion...`, "info", printToConsole);
+            const appendProgress = currentDO % 15 === 0;
+            log('Checking earlier deliveries…', 'info', appendProgress);
           } else if (tgl <= safetyNetDate) {
             historicalStreak++;
             if (historicalStreak > 25) {
-              log(`  🛑 Historical threshold achieved consistently (Streak: 25).`, "info");
+              log('Delivery check complete.', 'info');
               break;
             }
           }
@@ -108,15 +108,13 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
           trend.observe(null);
           emptyDoCount++;
           if (emptyDoCount > 150) {
-            log(`  ⚠ Consecutive dead-ends detected. Terminating Phase 1.`, "warn");
-            break;
+            throw new Error('Delivery records could not be verified.');
           }
         }
       } else trend.observe(null);
     } catch (err) {
       signal.throwIfAborted();
-      if (err.name === 'SessionExpiredError') throw err;
-      trend.observe(null);
+      throw err;
     }
     currentDO--;
   }
@@ -126,12 +124,12 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
   await waitForCompletion(signal);
 
   if (targetSOs.size === 0) {
-    log(`⚠ Zero active operations found in selected range.`, "warn");
+    log('No deliveries found for these months.', 'warn');
     return [];
   }
 
   const sortedTargets = Array.from(targetSOs).sort((a, b) => getSoMagnitude(b) - getSoMagnitude(a));
-  log(`[PHASE 2] Extracting Sales Data for ${sortedTargets.length} records.`, "info");
+  log(`Reading ${sortedTargets.length} sales orders.`, 'info');
 
   await pause(400, signal);
   setProgress(0, true);
@@ -145,10 +143,10 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
     try {
       const res = await dynamicFetch(soBaseUrl + id);
       if (!res.ok) return null;
-      const html = await res.text();
+      const html = await readRecord(res);
       const soMatch = html.match(/\d+\/ISI\/[A-Z0-9]+\/[A-Z]+\/\d{4}/);
       if (soMatch) return { id: id, soNumber: soMatch[0], mag: getSoMagnitude(soMatch[0]), html: html };
-    } catch (e) { signal.throwIfAborted(); if (e.name === "SessionExpiredError") throw e; }
+    } catch (e) { signal.throwIfAborted(); throw e; }
     return null;
   }
 
@@ -156,7 +154,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
     const targetSO = sortedTargets[i];
     const targetMag = getSoMagnitude(targetSO);
 
-    log(`  Processing [${i+1}/${totalTargets}]: ${targetSO}...`, "info");
+    log(`${i+1} of ${totalTargets}: ${targetSO}`, 'info');
     setProgress(Math.min(99, ((i+1) / totalTargets) * 100));
 
     let low = 1000, high = currentPos, pos = currentPos, jump = 1, isBinarySearch = false;
@@ -173,7 +171,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
             break;
           }
         }
-        if (!found) log(`  ⚠ Record ${targetSO} absent (Likely purged).`, "warn");
+        if (!found) throw new Error('A matching sales order could not be found.');
         break;
       }
 

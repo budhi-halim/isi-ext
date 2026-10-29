@@ -2,9 +2,7 @@
   if (!['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) return;
   const { pageSize } = window[Symbol.for('islandsun.table-density')];
   const tables = new Map();
-  const requestStarts = new WeakMap();
   let timer, active = false, suspended = false, jquery;
-  let lastFailure = -Infinity;
 
   function bindTableEvents() {
     jquery(document).off('.isiDensity')
@@ -14,18 +12,7 @@
         document.dispatchEvent(new Event('islandsun-table-draw'));
         schedule();
       })
-      .on('preXhr.dt.isiDensity', (_event, settings) => requestStarts.set(settings, performance.now()))
-      .on('xhr.dt.isiDensity', (_event, settings, json, xhr) => {
-        schedule();
-        if (json !== null || !xhr || Date.now() - lastFailure < 30000) return;
-        lastFailure = Date.now();
-        const started = requestStarts.get(settings);
-        // Failure metadata only: never log response bodies, record values or credentials.
-        console.warn('[Islandsun Portal Workspace] Table request failed', {
-          status: Number(xhr.status) || 0,
-          elapsedMs: started === undefined ? null : Math.round(performance.now() - started),
-        });
-      });
+      .on('xhr.dt.isiDensity', schedule);
   }
 
   function requestPending(api) {

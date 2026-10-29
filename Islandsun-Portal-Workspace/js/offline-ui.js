@@ -232,13 +232,17 @@ worker.onmessage = ({data}) => {
   $('#previous').disabled = !page;
   $('#next').disabled = (page+1)*Number($('#page-size').value) >= total;
   const pendingDates = data.meta?.importing ? data.meta.scan?.pendingDates || 0 : data.meta?.pendingDates || 0;
-  $('#coverage').textContent = `${connection.name || account} · ${data.saved.toLocaleString()} saved${kind === 'products' || source.summaryOnly || source.periodic ? '' : ` · ${data.details.toLocaleString()} detailed snapshots`} · ${data.meta?.total != null ? `${data.meta.total.toLocaleString()} entries in last server list` : 'First list pending'}${data.meta?.importing ? ` · Saving list (${data.meta.scan?.cursor?.toLocaleString() || 'in progress'})` : pendingDates ? ` · ${pendingDates.toLocaleString()} awaiting Stock Request dates` : data.meta?.partial ? source.periodic ? ' · Monthly capture in progress' : ' · List changed during capture; recheck pending' : ''}`;
-  if (data.meta?.importing) $('#coverage').textContent += ' · Refresh incomplete; records may have different saved times.';
-  else if (data.meta?.lastError && !pendingDates) $('#coverage').textContent += ' · Latest refresh failed; previously saved records remain available.';
-  if (source.periodic) $('#coverage').textContent += ` · ${data.meta?.periodsSaved || 0} of ${data.meta?.periodCount || 0} reporting months captured`;
+  const coverage = [`${data.saved.toLocaleString()} records saved`];
+  if (data.meta?.total != null) coverage.push(`${data.meta.total.toLocaleString()} in the portal list`);
+  if (!source.summaryOnly && !source.periodic && kind !== 'products') coverage.push(`${data.details.toLocaleString()} with details`);
+  if (source.periodic) coverage.push(`${data.meta?.periodsSaved || 0} of ${data.meta?.periodCount || 0} months saved`);
+  if (data.meta?.importing || pendingDates || data.meta?.partial) coverage.push('Saving in progress');
+  else if (data.meta?.lastError) coverage.push('Refresh failed; saved records are available');
+  else if (!data.meta?.checkedAt) coverage.push('Waiting for the first save');
   const skippedIdentifiers = (data.meta?.importing ? data.meta.scan?.skippedIdentifiers : data.meta?.skippedIdentifiers) || 0;
-  if (skippedIdentifiers) $('#coverage').textContent += ` · ${skippedIdentifiers.toLocaleString()} invalid identifiers skipped${data.meta?.importing ? ' so far' : ''}.`;
-  if (data.unverified) $('#coverage').textContent += ` · ${data.unverified.toLocaleString()} older records awaiting access checks.`;
+  if (skippedIdentifiers) coverage.push(`${skippedIdentifiers.toLocaleString()} records could not be saved`);
+  if (data.unverified) coverage.push(`${data.unverified.toLocaleString()} awaiting access checks`);
+  $('#coverage').textContent = coverage.join(' · ');
   if (!activeRecord) setSnapshotTime(`List saved: ${dateTime(source.periodic && $('#reporting-period').value ? data.meta?.periodStates?.[$('#reporting-period').value]?.checkedAt : data.meta?.checkedAt)}`);
 };
 worker.onerror = () => notices.show('The saved-record search stopped. Reopen the offline workspace.',{tone:'error'});
@@ -338,8 +342,8 @@ window.addEventListener('popstate',() => navigateSavedView(location.href));
 async function storageStatus() {
   const [estimate,persisted,retention] = await Promise.all([navigator.storage.estimate(),navigator.storage.persisted(),readArchive('meta','retention')]);
   const bytes = value => `${(value/1024/1024).toLocaleString(undefined,{maximumFractionDigits:1})} MB`;
-  $('#storage').textContent = `Browser storage: approximately ${bytes(estimate.usage || 0)} used of ${bytes(estimate.quota || 0)} available quota. ${persisted ? 'Persistent storage is enabled.' : 'The browser may reclaim this archive under storage pressure.'}`;
-  $('#retention').textContent = retention ? `Storage cleanup removed records and files dated ${retention.through} and earlier. Newer dates are retained first.` : 'When browser quota is reached, the oldest entry date is removed across all record types, together with its files.';
+  $('#storage').textContent = `${bytes(estimate.usage || 0)} used · ${bytes(estimate.quota || 0)} storage limit. ${persisted ? 'Protected from automatic browser cleanup.' : 'Select Keep archive to protect it from browser cleanup.'}`;
+  $('#retention').textContent = retention ? `Storage cleanup removed records through ${retention.through}.` : 'If storage fills up, the oldest records and files are removed first.';
 }
 $('#persist').addEventListener('click',async () => { const granted = await navigator.storage.persist(); notices.show(granted ? 'The browser will retain this archive until you clear it or remove the extension.' : 'The browser did not grant persistent storage. Your saved records remain available.',{tone:granted?'success':'warning'}); storageStatus(); });
 async function checkConnection() {

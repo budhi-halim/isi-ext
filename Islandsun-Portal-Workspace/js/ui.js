@@ -36,7 +36,6 @@ import { createObservedSampleTable } from './offline-observed-table.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { createTextareaLimits } from './textarea-limits.js';
 import { createModalAccessibility } from './modal-accessibility.js';
-import { createActivityConsole } from './activity-console.js';
 import { diagnosticLog } from './diagnostic-log.js';
 import { createArchiveStatusNotices } from './archive-status-notices.js';
 
@@ -50,7 +49,6 @@ async function start() {
   if (current !== generation) return;
   if (!enabled) { delete document.documentElement.dataset.isiPortal; document.documentElement.classList.remove('isi-theme'); document.documentElement.dataset.isiBoot = 'off'; return; }
   if (applyDefaultFilterDate()) return;
-  const activity = createActivityConsole();
   document.documentElement.dataset.isiPortal = 'enabled';
   document.documentElement.classList.add('isi-theme');
   const journal = createPresentationJournal();
@@ -59,7 +57,7 @@ async function start() {
   journal.capture(() => { refineShell(); translateInterface(); });
   const shellReady = performance.now();
   await accountReady;
-  if (current !== generation) { dropdownTranslation.destroy(); theme?.destroy(); journal.restore(); activity.destroy(); return; }
+  if (current !== generation) { dropdownTranslation.destroy(); theme?.destroy(); journal.restore(); return; }
   diagnosticLog('portal-startup', {moduleReadyMs:shellReady,accountWaitMs:performance.now()-shellReady});
   const notices = createNotifications();
   const dialogs = createPortalDialogs();
@@ -139,7 +137,6 @@ async function start() {
   }
   document.addEventListener('islandsun-table-draw', enhance);
   teardown = (preservePresentation = false) => {
-    activity.destroy();
     setOfflineAccount(null);
     observedTable.destroy();
     chrome.storage.onChanged.removeListener(accountChanged);
@@ -160,7 +157,7 @@ async function start() {
 }
 // Preserve the outgoing canvas until the browser replaces it, including form navigation.
 function startupFailed(error) {
-  console.error('[Islandsun] Portal enhancement startup failed.', error);
+  diagnosticLog('portal-startup-failed', {errorType:error.name, message:String(error.message).slice(0,500)});
   teardown?.();
   delete document.documentElement.dataset.isiPortal;
   document.documentElement.dataset.isiBoot = 'failed';

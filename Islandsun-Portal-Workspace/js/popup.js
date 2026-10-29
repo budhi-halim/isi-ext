@@ -7,6 +7,7 @@ import { readArchive } from './offline-store.js';
 import { initializeArchiveSettings } from './archive-settings-ui.js';
 import { readAccountSettings, requestAccountSettings, accountSettingsChanged } from './account-settings.js';
 import { journalExport } from './diagnostic-journal-store.js';
+import { diagnosticLog } from './diagnostic-log.js';
 initializeUpdatePopup('workspace', {discoverFamily:true});
 initializeTheme();
 const $ = selector => document.querySelector(selector);
@@ -17,7 +18,6 @@ const archiveSettings = initializeArchiveSettings(() => account);
 
 async function render() {
   const current = ++revision;
-  if (!globalThis.chrome?.storage) { $('#enabled').disabled = true; $('#message').textContent = 'Preview only. Load the extension to use these settings.'; return; }
   try {
     const settings = await readAccountSettings();
     const session = (await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY];
@@ -38,16 +38,16 @@ async function render() {
       $('#advanced-settings').open = false;
       if ($('#archive-delete-dialog').open) $('#archive-delete-dialog').close();
     }
-    $('#session-status').textContent = !settings.enabled || !settings.keepSessionAlive ? 'Session keep-alive is paused.'
+    $('#session-status').textContent = !settings.enabled || !settings.keepSessionAlive ? 'Session checks paused.'
       : session?.state === 'signed-out' ? 'Sign in again to keep your session active.'
       : session?.state === 'checking' ? 'Checking your sign-in…'
-      : session?.state === 'deferred' ? 'Waiting for other portal activity to finish. Retrying within a minute.'
-      : session?.state === 'retrying' ? 'The session check did not finish. It will retry automatically.'
-      : session?.state === 'active' ? 'Session checked at ' + new Date(session.checkedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + '. Checks run every five minutes while this browser is running.'
-      : 'Waiting for the first session check. It should start within a minute.';
-    $('#offline-status').textContent = !settings.offlineArchive ? 'Archiving paused. Your saved copy is still available.'
+      : session?.state === 'deferred' ? 'Waiting for the portal to finish loading.'
+      : session?.state === 'retrying' ? 'Rechecking your connection shortly.'
+      : session?.state === 'active' ? 'Session checked at ' + new Date(session.checkedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + '.'
+      : 'Checking your session shortly.';
+    $('#offline-status').textContent = !settings.offlineArchive ? 'Saving paused. Your offline copy is available.'
       : offline.account && offline.account !== account ? 'The offline copy fills in while you are signed in.'
-      : ({active:'Saving records and documents for offline access.',waiting:'Archiving waits while you edit or the portal is busy.',offline:'The portal connection could not be confirmed. Your saved copy is available.', 'signed-out':'Sign in to resume saving offline records.','unlock-required':'Saving will resume automatically while you are signed in to the portal.',attention:offline.error || 'Saving is temporarily unavailable. It will retry automatically.'})[offline.state] || 'The offline copy fills in while you are signed in.';
+      : ({active:'Saving your offline copy.',waiting:'Saving will resume when the portal is free.',offline:'The portal is unavailable. Your offline copy is available.', 'signed-out':'Sign in to resume saving.','unlock-required':'Preparing to resume saving.',attention:offline.error || 'Saving will retry shortly.'})[offline.state] || 'Your offline copy fills in while you are signed in.';
   } catch { $('#message').textContent = 'Settings could not be loaded. Reopen the extension.'; }
 }
 
@@ -76,19 +76,23 @@ render();
 
 $('#download-diagnostic-log').addEventListener('click', async event => {
   const button = event.currentTarget, message = $('#diagnostics-status');
-  if (button.disabled || !account) return;
-  button.disabled = true; message.textContent = 'Preparing the activity log…';
+  if (button.disabled) return;
+  button.disabled = true; message.textContent = 'Preparing log…';
   const owner = account;
   let url;
   try {
     const settings = await readAccountSettings();
     const saved = await chrome.storage.local.get([OFFLINE_STATUS,'islandsun.journal-error']);
-    const sources = await Promise.all(Object.keys(OFFLINE_SOURCES).map(async kind => diagnosticArchiveSource(kind,await readArchive('meta',`index:${owner}:${kind}`))));
-    const blob = await journalExport(owner,{settings,archive:saved[OFFLINE_STATUS],sources,logError:saved['islandsun.journal-error']});
+    const sources = owner ? await Promise.all(Object.keys(OFFLINE_SOURCES).map(async kind => diagnosticArchiveSource(kind,await readArchive('meta',`index:${owner}:${kind}`)))) : [];
+    const archive = owner && saved[OFFLINE_STATUS]?.account === owner ? saved[OFFLINE_STATUS] : undefined;
+    const blob = await journalExport(owner,{settings,archive,sources,logError:saved['islandsun.journal-error']});
     if ((await readAccountSettings()).account !== owner) throw new Error('The account changed. Reopen settings.');
     url = URL.createObjectURL(blob);
-    await chrome.downloads.download({url,filename:`islandsun-activity-${new Date().toISOString().replaceAll(':','-')}.json`,saveAs:false});
-    message.textContent = 'Activity log downloaded. Logging continues automatically.';
-  } catch (error) { message.textContent = error.message || 'The activity log could not be downloaded.'; }
+    await chrome.downloads.download({url,filename:`islandsun-log-${new Date().toISOString().replaceAll(':','-')}.json`,saveAs:false});
+    message.textContent = 'Log downloaded.';
+  } catch (error) {
+    message.textContent = 'Could not download the log. Reopen the extension and try again.';
+    diagnosticLog('log-export-failed', {errorType:error.name, message:String(error.message).slice(0,500)});
+  }
   finally { button.disabled = false; if (url) setTimeout(()=>URL.revokeObjectURL(url),60000); }
 });

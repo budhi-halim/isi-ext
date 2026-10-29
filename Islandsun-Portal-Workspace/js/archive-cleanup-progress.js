@@ -1,3 +1,5 @@
+import { diagnosticLog } from './diagnostic-log.js';
+
 export const ARCHIVE_CLEANUP = 'islandsun.archive-cleanup';
 
 /** Persist bounded progress so closing the popup does not hide an active cleanup. */
@@ -11,7 +13,7 @@ export function createArchiveCleanupProgress(account, scope) {
     lastWrite = now;
     const snapshot = {...value};
     writes = writes.then(() => chrome.storage.local.set({[ARCHIVE_CLEANUP]:snapshot})).catch(error => {
-      console.warn('Archive cleanup progress could not be saved.',error.name);
+      diagnosticLog('archive-cleanup-progress-failed', {errorType:error.name});
     });
     return writes;
   };

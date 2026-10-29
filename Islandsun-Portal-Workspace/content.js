@@ -1,5 +1,11 @@
 // The manifest installs the stylesheet before the first paint without blocking native content.
 if (['http://apps.islandsunindonesia.com:81', 'http://192.168.0.22:81'].includes(location.origin)) {
+  let calendarFailureAt = 0;
+  document.addEventListener('islandsun-calendar-failed', event => {
+    if (Date.now() - calendarFailureAt < 60000) return;
+    calendarFailureAt = Date.now();
+    chrome.runtime.sendMessage({type:'diagnostic-event',event:'sample-calendar-failed',fields:{errorType:String(event.detail?.errorType || 'Error').slice(0,80)}}).catch(() => {});
+  });
   document.addEventListener('submit',event => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement) || new URL(form.action).pathname !== '/islandsun/login/act_login') return;

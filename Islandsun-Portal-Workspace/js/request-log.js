@@ -1,4 +1,4 @@
-import { activityTime, createActivityLog } from './activity-log.js';
+import { createActivityLog } from './activity-log.js';
 import { diagnosticLog } from './diagnostic-log.js';
 
 const labels = new Map();
@@ -28,7 +28,6 @@ export function requestNumber(url) { return labels.get(String(url)); }
 export function logFetch(url, kind, number, {purpose, reason} = {}) {
   const label = extractNumber(number) || requestNumber(url);
   if (!label && !purpose) return;
-  console.info(`${activityTime()} ${label ? `${label} · ` : ''}fetching ${kind} · for ${purposeText(purpose,reason)}`);
   diagnosticLog('fetch-start',{kind,number:label,purpose,reason});
 }
 

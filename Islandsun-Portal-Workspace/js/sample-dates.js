@@ -81,7 +81,7 @@
     } catch (error) {
       // A changed portal widget must leave its date controls usable.
       for (const [input, state] of owned) restore(input, state);
-      console.warn('Islandsun could not apply the sample calendar limits.', error);
+      document.dispatchEvent(new CustomEvent('islandsun-calendar-failed', {detail:{errorType:error.name}}));
     } finally { busy = false; }
     return ready;
   }

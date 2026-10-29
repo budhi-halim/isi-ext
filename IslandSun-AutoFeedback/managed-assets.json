@@ -3,8 +3,8 @@
   "files": {
     "js/shared/portal-address.js": "a8add74881743475dc8b72bb07098abfa9ca30f445459fd3fe9cebc15e31ecbc",
     "js/shared/portal-session.js": "f5eed506d57fe030e1601af134f3f603ddb05453c629e7d20e66447e81b1a3c8",
-    "js/shared/update-logic.js": "41550e5de712824920400fc6d92000cdf3b3e8c1ba7fe0b1d40e06b262984434",
-    "js/shared/update-popup.js": "dcc74e567b3f7dc8010040102c5324fefdf9db370b5b56fede0b1038b376f75a",
+    "js/shared/update-logic.js": "56bbf3ef886603203407660c403e625b5fff04a35340d483aaec1fe347cc9780",
+    "js/shared/update-popup.js": "8540a9ace065faa88052da468c71241d5edc2ef5887b8b81dee74d2a14c19b7a",
     "js/shared/update-service.js": "e0dbcfcd14df04a21adbeb3e5e879510db75b913c76737d2a3c6a3cb780e55f7",
     "css/update-popup.css": "f0956bf1aac9246f388136789d590695381fa2f0b52e817d92da119d1e21c484"
   }

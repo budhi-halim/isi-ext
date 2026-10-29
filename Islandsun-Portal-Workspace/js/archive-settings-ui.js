@@ -48,7 +48,7 @@ export function initializeArchiveSettings(getAccount) {
       if (!response?.ok) throw new Error('unavailable');
       info = response.value;
       const size = (info.all.bytes / 1024 / 1024).toLocaleString(undefined,{maximumFractionDigits:1});
-      $('#archive-usage').textContent = `${info.all.records.toLocaleString()} records · ${info.all.files.toLocaleString()} file references · ${size} MB of document bytes across all accounts. Identical files share storage.${info.current ? ` ${info.name}: ${info.current.records.toLocaleString()} records.` : ' Sign in to manage your account’s copy.'}`;
+      $('#archive-usage').textContent = `${info.all.records.toLocaleString()} records · ${size} MB of files across all accounts.${info.current ? ` Your copy: ${info.current.records.toLocaleString()} records.` : ''}`;
     } catch (error) {
       if (current === revision) $('#archive-usage').textContent = 'Storage usage could not be read. Select Refresh storage usage to try again.';
       diagnosticLog('archive-settings-failed',{operation:'storage-usage',errorType:error.name,message:error.message});
@@ -59,8 +59,8 @@ export function initializeArchiveSettings(getAccount) {
     if (!getAccount() || busy()) return;
     selection = {scope,account:getAccount()};
     $('#archive-delete-description').textContent = scope === 'all'
-      ? 'Delete every account’s saved records and documents in this browser profile? This cannot be undone offline. Your saving settings stay unchanged; enabled saving rebuilds the copy automatically.'
-      : 'Delete your account’s saved copy? Other accounts keep their copies, including any shared files they use. Your saving settings stay unchanged; enabled saving rebuilds the copy automatically.';
+      ? 'Delete all accounts’ offline copies from this browser? You will need the portal connection to save them again. Live portal records are kept.'
+      : 'Delete your offline copy from this browser? You will need the portal connection to save it again. Other accounts and live portal records are kept.';
     dialog.showModal();
   }
   $('#clear-account-archive').addEventListener('click',() => ask('account'));

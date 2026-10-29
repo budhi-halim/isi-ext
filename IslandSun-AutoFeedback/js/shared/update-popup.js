@@ -29,7 +29,7 @@ export function initializeUpdatePopup(key, { discoverFamily = false } = {}) {
   };
   if (discoverFamily) {
     const permission = document.createElement('button'); permission.type = 'button'; permission.className = 'isi-button'; permission.textContent = 'Check all Islandsun extensions';
-    const explanation = document.createElement('p'); explanation.className = 'isi-muted'; explanation.textContent = 'Allow access to installed extensions to receive update reminders, including for disabled Islandsun extensions.';
+    const explanation = document.createElement('p'); explanation.className = 'isi-muted'; explanation.textContent = 'Allow access to installed extensions for Islandsun update reminders.';
     section.append(permission, explanation);
     const showPermission = async () => {
       try {

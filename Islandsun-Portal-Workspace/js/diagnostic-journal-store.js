@@ -152,6 +152,16 @@ async function trim(db) {
   await done;
 }
 
+/** Preserve account preferences before expiring their diagnostic evidence at worker startup. */
+export function maintainJournal(restorePreferences = async () => {}) {
+  return serialize(async () => {
+    const db = await database();
+    const rows = await result(db.transaction('incidents').objectStore('incidents').getAll());
+    await restorePreferences(rows.filter(row => row.event === 'notification-action-saved' && row.account));
+    await trim(db);
+  });
+}
+
 export function clearJournal(account = null, {onProgress = () => {}} = {}) {
   if (account === null) generation++;
   else accountGenerations.set(account,(accountGenerations.get(account) || 0) + 1);

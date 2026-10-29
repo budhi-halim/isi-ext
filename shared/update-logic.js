@@ -1,7 +1,7 @@
 export const UPDATE_KEY = 'islandsun.extension-updates.v1';
 export const UPDATE_FEED = 'https://budhi-halim.github.io/isi-ext/extension-versions.json';
 export const UPDATE_PAGE = 'https://budhi-halim.github.io/isi-ext/';
-export const CHECK_INTERVAL = 5 * 60 * 1000;
+export const CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 export const REMINDER_INTERVAL = 7 * 24 * 60 * 60 * 1000;
 export const FAMILY_EXTENSIONS = {
   workspace: { name: 'Islandsun Portal Workspace', directory: 'Islandsun-Portal-Workspace' },

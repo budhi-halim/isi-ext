@@ -43,4 +43,9 @@ export async function purgeCaptures(account = null) {
 export function startCaptureCleanup() {
   void purgeCaptures().catch(() => {});
   void chrome.storage.session.remove('islandsun.debug-capture-active').catch(() => {});
+  void chrome.storage.local.remove(['islandsun.connection-diagnostics','islandsun.connection-failures']).catch(() => {});
+  void chrome.storage.local.get('islandsun.journal-error').then(saved => {
+    const failure = saved['islandsun.journal-error'];
+    if (failure && failure.at < Date.now() - 7 * 86400000) return chrome.storage.local.remove('islandsun.journal-error');
+  }).catch(() => {});
 }

@@ -26,11 +26,11 @@ export function activityTime(value = Date.now()) {
   return [date.getHours(), date.getMinutes(), date.getSeconds()].map(part => String(part).padStart(2, '0')).join(':');
 }
 
-/** Deduplicate console messages and retain the same meaningful lifecycle changes. */
-export function createActivityLog(scope, { now = Date.now, write = text => console.info(text) } = {}) {
+/** Retain meaningful lifecycle changes without repeating unchanged status. */
+export function createActivityLog(scope, { now = Date.now, write = text => diagnosticLog('activity', {scope, message:text}) } = {}) {
   const notes = new Map();
   let paused, closed = false;
-  const emit = text => { if (!closed) { write(`${activityTime(now())} [Workspace · ${scope}] ${text}`); diagnosticLog('activity',{scope,message:text}); } };
+  const emit = text => { if (!closed) write(text); };
   return {
     note(key, text, repeatAfter = 60000) {
       if (closed || notes.has(key) && now() - notes.get(key) < repeatAfter) return;

@@ -7,7 +7,7 @@ export function createProductCache(load, { maxEntries = 90, maxBytes = 8 * 1024 
   let active = 0, urgentActive = 0, cachedBytes = 0, disposed = false, generation = 0;
   let storageWarning = false;
   function storageFailed() {
-    if (!storageWarning) console.warn('[Islandsun Portal Workspace] Product cache is limited to this page because session storage is unavailable.');
+    if (!storageWarning) diagnosticLog('product-cache-storage-failed', {fallback:'page-memory'});
     storageWarning = true;
   }
   const ready = persistence ? persistence.load().then(records => {

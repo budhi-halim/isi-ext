@@ -24,12 +24,12 @@
     <form id="offline-login-form" class="isi-card" novalidate>
       <img src="assets/family/assets/icons/family.svg" width="48" height="48" alt="">
       <h1 id="offline-sign-in-title">Open your saved workspace</h1>
-      <p id="offline-access-description" class="isi-muted">Sign in locally with your portal username and password. No internet connection is needed.</p>
+      <p id="offline-access-description" class="isi-muted">Use your portal sign-in to open your saved copy, even without internet.</p>
       <div id="offline-device-accounts" hidden><label for="offline-account-choice">Saved account</label><select id="offline-account-choice"></select></div>
       <div id="offline-credential-fields">
       <label for="offline-username">Username</label><input id="offline-username" name="username" autocomplete="username" required>
       <label id="offline-password-label" for="offline-password">Password</label><input id="offline-password" name="password" type="password" autocomplete="current-password" required aria-describedby="offline-login-help offline-login-error">
-      <p id="offline-login-help" class="isi-muted">Use the password from your last successful online sign-in with Portal Workspace enabled. One unlock covers your offline pages for this browser session.</p>
+      <p id="offline-login-help" class="isi-muted">Use the password you last signed in with while Portal Workspace was enabled.</p>
       </div>
       <p id="offline-login-error" role="alert"></p>
       <button id="offline-unlock" class="isi-button isi-button--primary" type="submit">Open saved copy</button>
@@ -61,13 +61,13 @@
       <div class="offline-calendar-scroll" tabindex="0" aria-label="Scrollable availability calendar"><div class="offline-calendar-weekdays" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div><div data-calendar-grid class="offline-calendar-grid"></div></div>
     </section>
     <details class="offline-storage">
-      <summary>Archive coverage and storage</summary>
-      <div class="offline-storage-content" role="region" aria-label="Archive coverage and storage">
-      <button id="close-archive-panel" class="isi-button" type="button">Close archive panel</button>
+      <summary>Offline storage</summary>
+      <div class="offline-storage-content" role="region" aria-label="Offline storage">
+      <button id="close-archive-panel" class="isi-button" type="button">Close</button>
       <p id="connection"></p>
       <p id="storage"></p><p id="retention"></p>
-      <p>Records and documents fill in gradually while the portal is available. Details may be older than the list. Items without a saved detail or file are marked explicitly.</p>
-      <p>Stock Card monthly history, Undelivered Stock and generated Delivery Order print sheets are excluded. Create, edit and submit requests in the live portal.</p>
+      <p>Records and files save gradually while you are signed in. Check their saved dates before using them.</p>
+      <p>Use the live portal to create or edit requests and view Undelivered Stock.</p>
       <button id="persist" class="isi-button" type="button">Keep archive on this device</button>
       <button id="check" class="isi-button" type="button">Check connection and sync</button>
       </div>

@@ -6,6 +6,10 @@ The default portal is `http://apps.islandsunindonesia.com:81`. All three extensi
 
 Workspace notification history, silence settings, popup preferences and monitoring progress also share one account-scoped extension store across both addresses and all portal tabs. Existing website histories are imported once without replaying queued popups. Retained diagnostic records of confirmed Silence and Dismiss actions can restore those choices even while the old address is unavailable. Native Save and Submit tracking keeps a synchronous navigation outbox until the extension confirms storage.
 
+Portal Workspace provides **Help → Download log** for support. Activity is retained for up to seven days within bounded storage; every worker startup removes expired events, incidents and response bodies. Confirmed notification preferences are migrated before their diagnostic evidence expires. Logs remain account scoped, redact credentials and encrypt captured responses at rest. The Help control is also available when signed out, exporting only unscoped activity. Console mirrors and obsolete diagnostic stores are removed. All three extensions check for releases daily, with failed checks retried sooner and update reminders limited to once per week per version.
+
+Revenue stops extraction when a network/server failure or an unresolved matching order would leave incomplete results. Confirmed missing historical IDs can still be skipped during discovery. It does not download an incomplete workbook as a successful extraction.
+
 Runtime sources stay in the three named extension folders. Load a folder containing `manifest.json` as an unpacked extension for local development. Keep that path stable to retain the extension's local settings and saved offline copies.
 
 Shared design assets come from the sibling `isi/family` package. Synchronize them with `node ../isi/family-tools/sync.mjs`, then `node tools/sync-extensions.mjs`. The tools reject conflicting local changes. Regenerate the update feed with `node tools/extension-versions.mjs` after changing extension versions.

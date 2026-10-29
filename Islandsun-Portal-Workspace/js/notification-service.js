@@ -3,7 +3,7 @@ import { portalOrigin, portalUrl } from './shared/portal-address.js';
 import { emptyNotificationState } from './notification-logic.js';
 import { notificationKey, mergeNotificationHistory, recoverNotificationActions, validateNotificationHistory } from './notification-history.js';
 import { applyNotificationIntents, mutateNotifications } from './notification-mutations.js';
-import { appendJournal, notificationJournalActions } from './diagnostic-journal-store.js';
+import { appendJournal, notificationJournalActions, maintainJournal } from './diagnostic-journal-store.js';
 
 /** One worker owns each account's history across both website origins and every portal tab. */
 export function createNotificationService({storage, readActions = notificationJournalActions, log = appendJournal}) {
@@ -77,6 +77,28 @@ export function createNotificationService({storage, readActions = notificationJo
     }
   }
   return {
+    async restore(actions) {
+      const accounts = new Map();
+      for (const action of actions) {
+        if (typeof action.account !== 'string' || !action.account || action.account.length > 200) continue;
+        if (!accounts.has(action.account)) accounts.set(action.account, []);
+        accounts.get(action.account).push(action);
+      }
+      for (const [account, history] of accounts) {
+        const key = notificationKey(account), saved = (await storage.get(key))[key];
+        if (saved && (saved.version !== 2 || !Number.isSafeInteger(saved.revision))) throw new Error('Notification history could not be read.');
+        if (saved?.recovered) continue;
+        const state = saved ? validateNotificationHistory(saved.state) : emptyNotificationState();
+        await storage.set({[key]: {
+          version: 2,
+          state: recoverNotificationActions(state, history),
+          migrated: saved?.migrated || {},
+          handled: saved?.handled || {},
+          recovered: true,
+          revision: (saved?.revision || 0) + 1,
+        }});
+      }
+    },
     run(message, context) {
       const previous = operations.get(message.account) || Promise.resolve();
       const next = previous.catch(() => {}).then(() => execute(message,context));
@@ -87,8 +109,13 @@ export function createNotificationService({storage, readActions = notificationJo
   };
 }
 
-export function startNotificationService(api = chrome) {
+export function startNotificationService(api = chrome, {maintenance = maintainJournal} = {}) {
   const service = createNotificationService({storage:api.storage.local});
+  // Runtime listeners register immediately; migration finishes before any notification mutation.
+  const ready = maintenance(actions => service.restore(actions));
+  void ready.catch(error => {
+    void api.storage.local.set({'islandsun.journal-error':{at:Date.now(),name:error.name,message:'Log cleanup could not finish.'}}).catch(() => {});
+  });
   api.runtime.onMessage.addListener((message,sender,respond) => {
     if (message?.type !== 'islandsun-notifications') return;
     if (sender.id !== api.runtime.id || sender.frameId !== 0 || !portalUrl(sender.url)
@@ -99,10 +126,11 @@ export function startNotificationService(api = chrome) {
       const scope = (await api.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
       if (scope?.account !== message.account) throw Object.assign(new Error('The signed-in account changed.'),{code:'ACCOUNT_CHANGED'});
     };
-    service.run(message,{origin:portalOrigin(sender.url),tabId:sender.tab?.id,assertAccount}).then(
+    ready.then(() => service.run(message,{origin:portalOrigin(sender.url),tabId:sender.tab?.id,assertAccount})).then(
       value => respond({ok:true,...value}),
       error => respond({ok:false,code:error.code === 'ACCOUNT_CHANGED' ? error.code : 'NOTIFICATION_STORAGE'}),
     );
     return true;
   });
+  return ready;
 }
