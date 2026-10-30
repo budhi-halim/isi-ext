@@ -10,8 +10,19 @@ export async function fetchPortal(url, signal) {
 
 export async function readRecord(response) {
   const text = await response.text();
-  if (isLoginDocument(text)) throw new SessionExpiredError();
+  if (recordNeedsSignIn(text)) throw new SessionExpiredError();
   return text;
+}
+
+function recordNeedsSignIn(text) {
+  if (!isLoginDocument(text)) return false;
+  if (!text.includes('loginMultipleUser')) return true;
+  const document = new DOMParser().parseFromString(text, 'text/html');
+  const accountSwitch = document.querySelector('form#loginMultipleUser');
+  if (!accountSwitch || !document.querySelector('.main-sidebar') || !document.querySelector('.content-wrapper')) return true;
+  // The signed-in shell embeds a login form for switching accounts without ending the current session.
+  accountSwitch.remove();
+  return isLoginDocument(document.documentElement.outerHTML);
 }
 
 export function pause(milliseconds, signal) {

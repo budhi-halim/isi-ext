@@ -10,6 +10,8 @@ Portal Workspace provides **Help → Download log** for support. Activity is ret
 
 Revenue stops extraction when a network/server failure or an unresolved matching order would leave incomplete results. Confirmed missing historical IDs can still be skipped during discovery. It does not download an incomplete workbook as a successful extraction.
 
+Revenue accepts the portal's embedded account-switch form inside signed-in record pages on either portal address. Standalone login pages, locked sessions and authentication redirects still stop extraction.
+
 Runtime sources stay in the three named extension folders. Load a folder containing `manifest.json` as an unpacked extension for local development. Keep that path stable to retain the extension's local settings and saved offline copies.
 
 Shared design assets come from the sibling `isi/family` package. Synchronize them with `node ../isi/family-tools/sync.mjs`, then `node tools/sync-extensions.mjs`. The tools reject conflicting local changes. Regenerate the update feed with `node tools/extension-versions.mjs` after changing extension versions.
