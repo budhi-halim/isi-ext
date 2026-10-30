@@ -76,7 +76,7 @@ export function startDebugCapture() {
           if (clientRequests.size>=64 || !validUrl(message.request?.url) || !/^(?:sample|tir|portal)-(?:index|detail|products|source|read)$/.test(message.kind)) return {};
           const attemptId=crypto.randomUUID();
           clientRequests.set(attemptId,{...context,documentId:sender.documentId,sessionId:session.id,kind:message.kind,expiresAt:Date.now()+120000});
-          const request={url:safeRequestUrl(message.request.url),method:message.request.method==='POST'?'POST':'GET',body:safeRequestBody(message.request.body),credentials:'include',redirect:'manual',timeoutMs:[25000,60000,120000].includes(message.request.timeoutMs) ? message.request.timeoutMs : 25000};
+          const request={url:safeRequestUrl(message.request.url),method:message.request.method==='POST'?'POST':'GET',body:safeRequestBody(message.request.body),credentials:'include',redirect:'manual',ajax:message.request.ajax === true,timeoutMs:[25000,60000,120000].includes(message.request.timeoutMs) ? message.request.timeoutMs : 25000};
           await note('request-start',{...context,attemptId,kind:message.kind,request},session);
           return {attemptId,expiresAt:session.expiresAt};
         }

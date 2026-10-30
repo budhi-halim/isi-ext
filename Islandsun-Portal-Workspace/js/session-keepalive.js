@@ -2,15 +2,16 @@ import { DEFAULT_PORTAL_ORIGIN, PORTAL_MATCHES, portalOrigin } from './shared/po
 import { readAccountSettings, accountSettingsChanged } from './account-settings.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { connectionFailure } from './connection-diagnostics.js';
+import { portalReadOptions } from './portal-read-options.js';
 export const SESSION_KEY = 'islandsun.session-keepalive';
 export const SESSION_ALARM = 'islandsun-session-keepalive';
-export const SESSION_INTERVAL = 5 * 60000;
+export const SESSION_INTERVAL = 2 * 60000;
 
 /** Refresh only the existing protected home session; never enter credentials or a record editor. */
 export async function refreshSession(signal, fetcher = fetch, origin = DEFAULT_PORTAL_ORIGIN) {
   if (portalOrigin(origin) !== origin) throw new TypeError('Unsupported portal address.');
   const root = `${origin}/islandsun/`;
-  const response = await fetcher(root, { credentials: 'include', cache: 'no-store', redirect: 'manual', signal });
+  const response = await fetcher(root, portalReadOptions(root, {cache:'no-store', signal}));
   try {
     if (response.type === 'opaqueredirect' || response.status >= 300 && response.status < 400) throw Object.assign(new Error('The portal session check redirected.'),{code:'SESSION_REDIRECT',status:response.status});
     const destination = new URL(response.url || root);

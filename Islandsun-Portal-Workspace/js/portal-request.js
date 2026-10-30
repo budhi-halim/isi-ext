@@ -7,6 +7,7 @@ import { createActivityLog } from './activity-log.js';
 import { ACCOUNT_SCOPE } from './account-scope.js';
 import { capturePortalFetch } from './debug-capture-client.js';
 import { recordKind } from './fetch-policy.js';
+import { portalReadOptions } from './portal-read-options.js';
 
 async function verifyPageAccount() {
   const link = document.querySelector('.user-menu a[href*="lockscreen?user="]');
@@ -153,7 +154,7 @@ export async function withPortalRead(task, { signal, priority = false, editorLoo
         loggedRecords.add(logKey);
       }
       // Background reads must never follow a protected page into a login/logout handler.
-      const response = await capturePortalFetch(url, { ...options, credentials: 'include', redirect: 'manual', signal: requestSignal }, kind, binary ? 60000 : 25000);
+      const response = await capturePortalFetch(url, portalReadOptions(url, {...options, signal:requestSignal}), kind, binary ? 60000 : 25000);
       status = response.status;
       if (response.type === 'opaqueredirect' || status >= 300 && status < 400) {
         const error = new Error('The portal redirected this background lookup. Live checks are paused briefly; your current page is unchanged.');

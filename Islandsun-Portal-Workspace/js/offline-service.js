@@ -27,6 +27,7 @@ import { clearOfflineSession } from './offline-session.js';
 import { documentFilename, dispositionFilename, downloadUrl } from './shared/document-names.js';
 import { clearJournal } from './diagnostic-journal-store.js';
 import { SOURCE_ORDER } from './fetch-policy.js';
+import { portalReadOptions } from './portal-read-options.js';
 import { clearProductSessions } from './product-session-store.js';
 
 const ALARM = 'islandsun-offline-sync';
@@ -71,7 +72,7 @@ async function closeParser() {
 
 export async function archiveResponse(url, signal, options = {}, fetcher = fetch) {
   const {timeoutMs = 25000, onHttpError, ...requestOptions} = options;
-  const response = await fetcher(url, {...requestOptions, credentials:'include', redirect:'manual', cache:'no-store', signal:AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])});
+  const response = await fetcher(url, portalReadOptions(url, {...requestOptions, cache:'no-store', signal:AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])}));
   if (response.type === 'opaqueredirect' || response.status >= 300 && response.status < 400 || [401,403].includes(response.status)) {
     await response.body?.cancel();
     throw Object.assign(new Error('Sign in to continue saving offline records.'), {code:'SIGNED_OUT',status:response.status});
@@ -213,7 +214,10 @@ export function startOfflineService(gate, diagnostics, debug) {
       });
       if (home.deferred) { await status({state:'waiting'}); return; }
       signal.throwIfAborted();
-      if (!home.result) { await setAccountScope('','',started,runningOrigin); await status({state:'signed-out', account:'',name:'',checkedAt:Date.now()},probeRevision); return; }
+      if (!home.result) {
+        if (await setAccountScope('','',started,runningOrigin)) await status({state:'signed-out', account:'',name:'',checkedAt:Date.now()},probeRevision);
+        return;
+      }
       await status({...(settings.offlineArchive ? {} : {state:'paused'}),checkedAt:Date.now(),error:''},probeRevision);
       signal.throwIfAborted();
       checkingConnection = false;
@@ -492,7 +496,7 @@ export function startOfflineService(gate, diagnostics, debug) {
       }
       else {
         if (error.code !== 'OFFLINE_LOCKED' && !reportedFailures.has(error)) await diagnostics?.append({kind:'archive-processing',outcome:connectionFailure(error),durationMs:Date.now()-started}).catch(() => {});
-        if (error.code === 'SIGNED_OUT') await setAccountScope('','',started,runningOrigin);
+        if (error.code === 'SIGNED_OUT' && !await setAccountScope('','',started,runningOrigin)) return;
         const failure = archiveFailure(error, checkingConnection);
         if (failure.state === 'offline') {
           outageRevision++; gate.setPortalOffline?.(true);
@@ -512,7 +516,7 @@ export function startOfflineService(gate, diagnostics, debug) {
     const settings = await readAccountSettings();
     const previous = (await chrome.storage.local.get(OFFLINE_STATUS))[OFFLINE_STATUS] || {};
     if (!settings.enabled || settings.account && !settings.offlineArchive && !previous.hadOutage) { controller?.abort(); await chrome.alarms.clear(ALARM); await status({state:'paused'}); return; }
-    if (previous.state === 'unlock-required') await status({state:'waiting',error:''});
+    if (previous.state === 'unlock-required' || previous.state === 'signed-out' && settings.account) await status({state:'waiting',error:''});
     const alarm = await chrome.alarms.get(ALARM);
     if (alarm?.periodInMinutes !== 0.5) await chrome.alarms.create(ALARM,{delayInMinutes:0.5,periodInMinutes:0.5});
   }

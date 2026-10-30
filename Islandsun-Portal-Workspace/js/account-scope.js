@@ -10,10 +10,11 @@ let updates = Promise.resolve();
 export function setAccountScope(account, name = '', observedAt = Date.now(), origin) {
   const result = updates.then(async () => {
     const previous = (await chrome.storage.local.get(ACCOUNT_SCOPE))[ACCOUNT_SCOPE];
-    if (previous?.observedAt > observedAt) return;
+    if (previous?.observedAt > observedAt) return false;
     const next = {account:account || '', name:account ? name || account : '', observedAt,
       origin:portalOrigin(origin) || portalOrigin(previous?.origin) || DEFAULT_PORTAL_ORIGIN};
     await chrome.storage.local.set({[ACCOUNT_SCOPE]:next});
+    return true;
   });
   updates = result.catch(() => {});
   return result;

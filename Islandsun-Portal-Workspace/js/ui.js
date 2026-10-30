@@ -91,7 +91,8 @@ async function start() {
     observedTable.destroy();
     monitor?.destroy(); submissions?.destroy(); saves?.destroy(); center?.destroy(); combinedStore?.destroy(); store?.destroy(); archiveFeedback?.destroy();
     products.destroy(); repository.destroy(); setOfflineAccount(null);
-    notices.notify('The signed-in account changed. Reload this page before continuing.',{key:'account-changed',tone:'warning'});
+    if (scope.account) notices.notify('The signed-in account changed. Reload this page before continuing.',{key:'account-changed',tone:'warning'});
+    else notices.notify('Your portal session expired. Sign in again.',{key:'portal-sign-in',tone:'warning',href:`${PORTAL_ORIGIN}/islandsun/login`});
   }
   const accountChanged = (changes,area) => { if (area === 'local' && changes[ACCOUNT_SCOPE]) checkAccount(changes[ACCOUNT_SCOPE].newValue); };
   if (account && document.querySelector('.content-wrapper')) {

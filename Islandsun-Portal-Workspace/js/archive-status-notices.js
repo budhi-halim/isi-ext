@@ -1,19 +1,16 @@
-import { OFFLINE_STATUS, PORTAL_HOME } from './offline-config.js';
+import { OFFLINE_STATUS } from './offline-config.js';
 import { readAccountSettings, accountSettingsChanged } from './account-settings.js';
 import { diagnosticLog } from './diagnostic-log.js';
 
-/** Announce actionable archive problems; ordinary retries stay in settings. */
+/** Archive progress can outlive a login; only the account scope owns session warnings. */
 export function createArchiveStatusNotices(account, notices) {
   let disposed = false, revision = 0, current, announced = '';
   async function observe(status) {
     current = status;
     const sequence = ++revision;
-    const action = status?.account === account
-      ? status.state === 'signed-out' ? 'sign-in' : status.state === 'attention' && status.actionNeeded === 'free-storage' ? 'storage' : ''
-      : '';
+    const action = status?.account === account && status.state === 'attention' && status.actionNeeded === 'free-storage' ? 'storage' : '';
     if (!action) {
       notices.dismiss('archive-storage-full');
-      if (status?.account === account && status.state === 'active') notices.dismiss('portal-sign-in');
       return;
     }
     try {
@@ -23,9 +20,7 @@ export function createArchiveStatusNotices(account, notices) {
         announced = ''; notices.dismiss('archive-storage-full'); return;
       }
       if (action === announced) return;
-      const accepted = action === 'sign-in'
-        ? notices.notify('Your portal session expired. Sign in again.', {key:'portal-sign-in',tone:'warning',href:`${PORTAL_HOME}login`})
-        : notices.notify('Browser storage is full. Free some space to continue saving the offline copy.', {key:'archive-storage-full',tone:'warning'});
+      const accepted = notices.notify('Browser storage is full. Free some space to continue saving the offline copy.', {key:'archive-storage-full',tone:'warning'});
       if (accepted !== false) announced = action;
     } catch (error) { diagnosticLog('archive-status-display-failed',{errorType:error.name,message:String(error.message).slice(0,500)}); }
   }

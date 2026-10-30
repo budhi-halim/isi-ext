@@ -13,6 +13,7 @@ export async function capturePortalFetch(url, options, kind, timeoutMs = 25000) 
   const registration = send({type:'debug-portal-start',kind,request:{
     url:safeRequestUrl(String(url)),method:options.method || 'GET',body:safeRequestBody(options.body),
     credentials:options.credentials,redirect:options.redirect,timeoutMs,
+    ajax:new Headers(options.headers).get('x-requested-with') === 'XMLHttpRequest',
   }}).then(capture => { captureState = capture?.attemptId ? capture : null; activeUntil = capture?.expiresAt || 0; return capture; });
   const report = async (event,fields) => {
     const capture = await registration;
