@@ -93,7 +93,9 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         result = await checkDocuments(result,previous,signal,partial => retain(partial,true));
       }
       await retain(result,documents,true);
-      diagnosticLog('monitor-observed',{kind:record.kind,number:record.number,purpose,statusChanged:!!changed,documents});
+      diagnosticLog('monitor-observed',{kind:record.kind,number:record.number,purpose,status:record.status,statusChanged:!!changed,documents,
+        ...(record.kind === 'tir' ? {requestedDocuments:result.documents.length,readyDocuments:result.documents.filter(item => item.ready).length,
+          excludedTemplates:result.excludedDocumentIds?.length || 0,documentsUnavailable:!!result.documentsUnavailable} : {})});
       return true;
     } catch (error) {
       if (signal.aborted || readPauseReason(error) || error.code === 'NOTIFICATION_STORAGE' || error.message === 'session' || /session has expired/i.test(error.message)) throw error;
@@ -140,7 +142,8 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         // Weekly reminders advance from the verified snapshot without another detail request.
         for (const record of index) {
           const previous = memory.checked[`${record.kind}:${record.id}`];
-          if (previous?.snapshot && previous.signature === statusSignature(record)) await store.observe({...previous.snapshot,...record});
+          if (previous?.snapshot && previous.signature === statusSignature(record)
+            && (record.kind !== 'tir' || Array.isArray(previous.snapshot.excludedDocumentIds))) await store.observe({...previous.snapshot,...record});
         }
         await checkpoint(); notices.dismiss('portal-sign-in');
         diagnosticLog('monitor-index',{records:index.length,intervalMs:INDEX_FRESH_MS});
@@ -177,8 +180,10 @@ export function createNotificationMonitor(store, repository, notices, accountNam
         memory.discovery = next.rotation; await checkpoint(); schedule(250); return;
       }
       if (!memory.tir.queue && Date.now() >= (memory.tir.nextAt || 0)) {
+        const outcomes = store.read().submissionOutcomes;
         memory.tir = {queue:memory.records.filter(record => record.kind === 'tir' && monitorDetailsEligible(record)
-          && shouldMonitorTir(record,memory.checked[`tir:${record.id}`])).map(record=>`tir:${record.id}`),cursor:0,startedAt:Date.now()};
+          && (outcomes?.[`tir:${record.id}`]?.awaitingDocuments || shouldMonitorTir(record,memory.checked[`tir:${record.id}`])))
+          .map(record=>`tir:${record.id}`),cursor:0,startedAt:Date.now()};
         await checkpoint();
       }
       if (memory.tir.queue) {

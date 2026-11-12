@@ -18,8 +18,10 @@ export function previewQueue(records, pageSize) {
 export function nextNotificationRead({ records, checked, discovery = {}, pageSize = 10 }, now = Date.now()) {
   const pending = records.filter(record => monitorDetailsEligible(record)
     && !(checked[`${record.kind}:${record.id}`]?.retryAt > now)
-    && checked[`${record.kind}:${record.id}`]?.signature !== statusSignature(record));
-  const changed = pending.filter(record => checked[`${record.kind}:${record.id}`]?.signature !== undefined);
+    && (checked[`${record.kind}:${record.id}`]?.signature !== statusSignature(record)
+      || record.kind === 'tir' && !Array.isArray(checked[`${record.kind}:${record.id}`]?.snapshot?.excludedDocumentIds)));
+  const changed = pending.filter(record => checked[`${record.kind}:${record.id}`]?.signature !== undefined
+    && checked[`${record.kind}:${record.id}`].signature !== statusSignature(record));
   const candidates = changed.length ? changed : pending;
   let kind = KINDS.includes(discovery.kind) ? discovery.kind : 'sample';
   let count = Number(discovery.count) || 0;

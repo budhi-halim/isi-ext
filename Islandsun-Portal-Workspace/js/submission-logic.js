@@ -30,7 +30,7 @@ export function notificationTone(type) {
 /** Status tracking needs draft/rejected rows; expensive document reads do not. */
 export function monitorDetailsEligible(record) {
   const status = normalizedStatus(record.status);
-  if (record.kind === 'tir') return ['APPROVE', 'APPROVED', 'PARTIAL COMPLETE', 'PARTIAL COMPLETED', 'COMPLETE', 'COMPLETED'].includes(status);
+  if (record.kind === 'tir') return ['APPROVE', 'APPROVED', 'FULLFIL', 'PARTIAL COMPLETE', 'PARTIAL COMPLETED', 'COMPLETE', 'COMPLETED'].includes(status);
   return record.kind === 'sample' && [...ACTIVE_SAMPLE, 'COMPLETE', 'COMPLETED', 'COMPLETED BY SYSTEM'].includes(status);
 }
 
@@ -96,7 +96,7 @@ export function observeSubmissionStatuses(previous, records, { now = Date.now(),
       // A previously opened detail tab can be stale. It may confirm its own pending intent,
       // but rollback/rejection is decided only from the serialized fresh index.
       if (known && !known.confirmed && stage === 'active') {
-        state.submissions[key] = { ...known, confirmed: true, observed: observedAt };
+        state.submissions[key] = { ...known, status: normalizedStatus(raw.status), confirmed: true, observed: observedAt };
         discardRecordNotices(state, key, ['unsubmitted']);
         if (state.drafts) delete state.drafts[key];
         if (state.submissionOutcomes) delete state.submissionOutcomes[key];
@@ -107,12 +107,21 @@ export function observeSubmissionStatuses(previous, records, { now = Date.now(),
       discardRecordNotices(state, key, ['unsubmitted', 'rollback', 'rejected', 'cancelled']);
       if (state.drafts) delete state.drafts[key];
       if (state.submissionOutcomes) delete state.submissionOutcomes[key];
-      state.submissions[key] = { ...record, token: known?.token || `observed-${observedAt}`, created: known?.created ?? observedAt, confirmed: true, observed: observedAt };
+      const status = normalizedStatus(raw.status);
+      const documentProgressPending = record.kind === 'tir' && (known?.documentProgressPending
+        || known?.confirmed && known.status && !['PARTIAL COMPLETE', 'PARTIAL COMPLETED'].includes(known.status)
+          && ['PARTIAL COMPLETE', 'PARTIAL COMPLETED'].includes(status));
+      state.submissions[key] = { ...record, status, token: known?.token || `observed-${observedAt}`, created: known?.created ?? observedAt,
+        confirmed: true, observed: observedAt, ...(documentProgressPending ? {documentProgressPending:true} : {}) };
     } else if (stage === 'complete') {
       discardRecordNotices(state, key, ['unsubmitted', 'rollback', 'rejected', 'cancelled']);
       if (state.drafts) delete state.drafts[key];
       state.submissionOutcomes ||= {};
-      state.submissionOutcomes[key] = {token:known?.token || outcome?.token || `observed-${observedAt}`,stage,observed:observedAt};
+      // Upload rows may appear only after approval. Preserve the observed transition until
+      // a detail response confirms that every requested document is actually available.
+      const awaitingDocuments = record.kind === 'tir' && (known?.confirmed || outcome?.awaitingDocuments === true);
+      state.submissionOutcomes[key] = {token:known?.token || outcome?.token || `observed-${observedAt}`,stage,observed:observedAt,
+        ...(awaitingDocuments ? {awaitingDocuments:true} : {})};
       delete state.submissions[key];
     } else {
       discardRecordNotices(state, key, ['overdue', 'ready', 'complete']);

@@ -1,4 +1,4 @@
-import { monitorDetailsEligible } from './submission-logic.js';
+import { monitorDetailsEligible, normalizedStatus, submissionStage } from './submission-logic.js';
 import { pruneNotificationState } from './notification-relevance.js';
 import { calendarDay, localCalendarDate } from './calendar-day.js';
 import { notificationMuteKey } from './notification-types.js';
@@ -20,7 +20,7 @@ export function acknowledgeNotices(state, items) {
 export function observeRecord(previous, record, { now = Date.now(), today = localCalendarDate(now) } = {}) {
   const state = structuredClone(previous);
   const key = `${record.kind}:${record.id}`;
-  const known = state.jobs[key];
+  let known = state.jobs[key];
   const notify = (id, message, extra = {}) => {
     const item = { id, key, number:record.number, message, created: now, url: record.url, customer:record.customer || '', ...extra };
     item.muteKey = notificationMuteKey(item);
@@ -34,7 +34,17 @@ export function observeRecord(previous, record, { now = Date.now(), today = loca
   const pending = {};
   if (record.kind === 'tir') {
     if (record.status != null && !monitorDetailsEligible(record)) return state;
-    if (!record.documents?.length) return state;
+    const excluded = new Set(record.excludedDocumentIds || []);
+    if (known && excluded.size) {
+      const retained = Object.fromEntries(Object.entries(known.pending).filter(([id]) => !excluded.has(id)));
+      if (Object.keys(retained).length) state.jobs[key] = { ...known, pending: retained };
+      else delete state.jobs[key];
+      known = state.jobs[key];
+    }
+    if (!record.documents?.length) return pruneNotificationState(state);
+    const submission = state.submissions?.[key];
+    const observedProgress = submission?.documentProgressPending
+      && ['PARTIAL COMPLETE', 'PARTIAL COMPLETED'].includes(normalizedStatus(record.status));
     for (const document of record.documents) {
       const documentKey = String(document.id);
       const muteKey = `${key}:${documentKey}`;
@@ -50,7 +60,7 @@ export function observeRecord(previous, record, { now = Date.now(), today = loca
         state.documentVersions[versionKey] = document.hash;
       }
       if (document.ready) {
-        if (tracked) notify(`${key}:${documentKey}:ready`, `${record.number}: ${document.label} is ready.`, { type: 'ready', documentId: documentKey });
+        if (tracked || observedProgress) notify(`${key}:${documentKey}:ready`, `${record.number}: ${document.label} is ready.`, { type: 'ready', documentId: documentKey });
         continue;
       }
       const lastWeek = tracked?.lastWeek || 0;
@@ -63,7 +73,13 @@ export function observeRecord(previous, record, { now = Date.now(), today = loca
     for (const [id, document] of Object.entries(known?.pending || {})) {
       if (!record.documents.some(item => String(item.id) === id)) pending[id] = document;
     }
-    if (known && Object.keys(known.pending).length && !Object.keys(pending).length) notify(`${key}:complete`, `${record.number}: all documents are ready.`, { type: 'complete' });
+    const outcome = state.submissionOutcomes?.[key];
+    const observedCompletion = outcome?.awaitingDocuments && submissionStage('tir', record.status) === 'complete';
+    if ((known && Object.keys(known.pending).length || observedCompletion || observedProgress) && !Object.keys(pending).length) {
+      notify(`${key}:complete`, `${record.number}: all documents are ready.`, { type: 'complete' });
+      if (outcome) delete outcome.awaitingDocuments;
+    }
+    if (observedProgress && record.documents.some(document => document.ready)) delete submission.documentProgressPending;
   } else if (record.kind === 'sample') {
     if (record.status != null && !monitorDetailsEligible(record)) return state;
     if (!Number.isInteger(record.requestedCount) || record.requestedCount < 1 || !Number.isInteger(record.providedCount)) return state;

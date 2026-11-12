@@ -1,7 +1,7 @@
 import { isTirSourceUrl, sourceProduct } from './tir-source-logic.js';
 import { readPortalText } from './portal-request.js';
 import { readDetail } from './portal-data.js';
-import { documentReadiness } from './document-readiness.js';
+import { readTirDocumentState } from './document-readiness.js';
 
 export function parseTirProducts(html) {
   const root = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html');
@@ -25,7 +25,7 @@ function selectedTirProducts(root) {
 
 export async function readTirRecordProducts(url, signal, options) {
   const root = await readDetail(url, signal, options);
-  return { ...selectedTirProducts(root), documents: documentReadiness(root) };
+  return { ...selectedTirProducts(root), ...readTirDocumentState(root) };
 }
 
 export async function readTirSourceProducts(url, signal, { priority = true, purpose, readText = readPortalText } = {}) {

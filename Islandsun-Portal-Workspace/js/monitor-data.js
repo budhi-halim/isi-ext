@@ -44,8 +44,10 @@ export async function readMonitoredRecord(record, repository, signal, options = 
     return { ...record, requestedCount: result.requestedCount, providedCount: result.providedCount };
   }
   let result = await repository.get(record.url, {maxAge:PREVIEW_FRESH_MS,...request});
-  // Older session entries contain only preview products.
-  if (!Array.isArray(result.documents)) result = await repository.get(record.url, {...request,fresh:true});
+  // Cached snapshots without template classification must be read from the portal again.
+  if (!Array.isArray(result.documents) || !Array.isArray(result.excludedDocumentIds)) {
+    result = await repository.get(record.url, {...request,fresh:true});
+  }
   const documents = result.documents || [];
-  return { ...record, documents, documentsUnavailable: !documents.length };
+  return { ...record, documents, excludedDocumentIds: result.excludedDocumentIds || [], documentsUnavailable: !documents.length };
 }
