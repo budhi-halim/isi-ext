@@ -39,6 +39,15 @@ body { margin: 0; background: var(--isi-background); }
 @keyframes shimmer-move { 0% { background-position: -300px 0; } 100% { background-position: 0 0; } }
 #status-text { grid-column: 1 / -1; grid-row: 3; height: 3em; line-height: 1.5; color: var(--isi-muted); font-size: .82rem; text-align: center; overflow-wrap: anywhere; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
+/* Skipped orders remain visible without displacing the progress or activity history. */
+.skipped-report { grid-column: 1 / -1; min-width: 0; padding: 8px 12px; border: 1px solid var(--isi-border); border-radius: var(--isi-control-radius); background: var(--isi-surface); }
+.skipped-report summary { cursor: pointer; font-size: .8rem; font-weight: 700; color: var(--isi-text); }
+.skipped-report ol { margin: 8px 0 0; padding: 0 0 0 24px; max-height: 132px; overflow-y: auto; overscroll-behavior: contain; font-size: .76rem; line-height: 1.45; }
+.skipped-report li { padding: 5px 0; overflow-wrap: anywhere; }
+.skipped-report li + li { border-top: 1px solid var(--isi-border); }
+.skipped-report li strong { display: block; font-variant-numeric: tabular-nums; }
+.skipped-report li span { display: block; color: var(--isi-muted); }
+
 /* === Bounded activity history === */
 .activity-log { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .activity-log::details-content { display: contents; }
