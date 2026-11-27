@@ -2,6 +2,7 @@ import { DEFAULT_PORTAL_ORIGIN, rebasePortalUrl } from './shared/portal-address.
 import { fetchPortal, isTransientPortalError, pause, readRecord } from './portal.js';
 import { createDateTrend } from './trend.js';
 import { extractData, getSoMagnitude } from './records.js';
+import { findSalesOrder } from './search.js';
 
 export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LATEST_DO_ID, latestSO: LATEST_SO_ID, signal, ui, origin = DEFAULT_PORTAL_ORIGIN, checkpoint, checkpoints }) {
   const { setProgress, setPhaseState, log, waitForCompletion } = ui;
@@ -150,19 +151,23 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
 
   if (checkpoint.targets.length === 0) {
     log('No deliveries found for these months.', 'warn');
-    return [];
+    return { data: [], skipped: [], totalOrders: 0 };
   }
 
   const sortedTargets = checkpoint.targets;
   const totalTargets = sortedTargets.length;
   const savedOrders = await checkpoints.loadSavedOrders(checkpoint.key);
-  const rowsByOrder = new Map(savedOrders.map(order => [order.soNumber, order.rows]));
+  const savedByOrder = new Map(savedOrders.map(order => [order.soNumber, order]));
+  const rowsByOrder = new Map(savedOrders.filter(order => order.status !== 'skipped').map(order => [order.soNumber, order.rows]));
+  const skippedOrders = sortedTargets.filter(so => savedByOrder.get(so)?.status === 'skipped')
+    .map(so => ({ soNumber: so, reason: savedByOrder.get(so).reason }));
+  ui.setSkippedOrders(skippedOrders);
   const nextOrder = checkpoint.nextOrder || 0;
   if (nextOrder < 0 || nextOrder > totalTargets ||
-      sortedTargets.slice(0, nextOrder).some(so => !rowsByOrder.has(so))) {
+      sortedTargets.slice(0, nextOrder).some(so => !savedByOrder.has(so))) {
     throw new Error('Saved sales data is inconsistent. Use Start over to scan this period again.');
   }
-  log('Reading ' + totalTargets + ' sales orders (' + nextOrder + ' already saved).', 'info');
+  log('Reading ' + totalTargets + ' sales orders (' + nextOrder + ' already processed).', 'info');
   await pause(400, signal);
   setProgress(0, true);
   setPhaseState(2);
@@ -176,8 +181,21 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
     checkpoint.nextOrder = index + 1;
     await checkpoints.saveCompletedOrder(checkpoint, targetSO, pageData.id, rows);
     rowsByOrder.set(targetSO, rows);
+    savedByOrder.set(targetSO, { soNumber: targetSO, rows });
     currentPos = pageData.id;
     setProgress(Math.min(99, (index + 1) / totalTargets * 100));
+  }
+
+  async function skipOrder(targetSO, index) {
+    const reason = 'Not located in the expected sales-order record range; verify this order in the company portal.';
+    checkpoint.nextOrder = index + 1;
+    // Never adjust currentPos when an order is skipped: we have no verified ID.
+    await checkpoints.saveSkippedOrder(checkpoint, targetSO, reason);
+    savedByOrder.set(targetSO, { soNumber: targetSO, rows: [], status: 'skipped', reason });
+    skippedOrders.push({ soNumber: targetSO, reason });
+    ui.setSkippedOrders(skippedOrders);
+    setProgress(Math.min(99, (index + 1) / totalTargets * 100));
+    log('Skipped ' + targetSO + ': ' + reason, 'warn');
   }
 
   async function tryFetch(id) {
@@ -193,51 +211,14 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
 
   for (let i = nextOrder; i < totalTargets; i++) {
     const targetSO = sortedTargets[i];
-    const targetMag = getSoMagnitude(targetSO);
-
-    log(`${i+1} of ${totalTargets}: ${targetSO}`, 'info');
+    log(`${i + 1} of ${totalTargets}: ${targetSO}`, 'info');
     setProgress(Math.min(99, (i / totalTargets) * 100));
 
-    let low = 1000, high = currentPos, pos = currentPos, jump = 1, isBinarySearch = false;
-
-    while (true) {
-      if (high - low <= 5) {
-        let found = false;
-        for (let scanId = high; scanId >= low; scanId--) {
-          const pageData = await tryFetch(scanId);
-          if (pageData && pageData.soNumber === targetSO) {
-            await completeOrder(pageData, targetSO, i);
-            found = true;
-            break;
-          }
-        }
-        if (!found) throw new Error('Sales order ' + targetSO + ' could not be found in the expected record range. No incomplete workbook was exported.');
-        break;
-      }
-
-      if (!Number.isSafeInteger(pos) || pos < 1) throw new Error("Sales lookup reached an invalid index.");
-      const pageData = await tryFetch(pos);
-      if (!pageData) {
-        if (!isBinarySearch) { pos -= jump; jump *= 2; }
-        else { pos--; }
-        continue;
-      }
-
-      if (pageData.soNumber === targetSO) {
-        await completeOrder(pageData, targetSO, i);
-        break;
-      }
-
-      if (pageData.mag >= targetMag) {
-        high = pageData.id;
-        if (!isBinarySearch) { pos = pageData.id - jump; jump *= 2; }
-        else { pos = Math.floor((low + high) / 2); }
-      } else {
-        low = pageData.id;
-        if(!isBinarySearch) isBinarySearch = true;
-        pos = Math.floor((low + high) / 2);
-      }
-    }
+    // Sales-order series can be interleaved, so a previous match is not
+    // necessarily an upper bound for the next one.
+    const pageData = await findSalesOrder(targetSO, currentPos, LATEST_SO_ID, tryFetch);
+    if (pageData) await completeOrder(pageData, targetSO, i);
+    else await skipOrder(targetSO, i);
   }
 
   setProgress(100);
@@ -245,12 +226,13 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
   checkpoint.phase = 'ready';
   await checkpoints.saveCheckpoint(checkpoint);
 
-  // Rebuild strictly in target order, including orders processed in earlier sessions.
+  // Rebuild strictly in target order, retaining the omissions in a separate report.
   const finalData = [];
   for (const so of sortedTargets) {
+    if (savedByOrder.get(so)?.status === 'skipped') continue;
     const rows = rowsByOrder.get(so);
     if (!rows) throw new Error('Saved sales data is missing for ' + so + '. Use Start over.');
     finalData.push(...rows);
   }
-  return finalData;
+  return { data: finalData, skipped: skippedOrders, totalOrders: totalTargets };
 }

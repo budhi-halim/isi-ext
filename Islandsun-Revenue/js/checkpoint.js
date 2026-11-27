@@ -90,6 +90,16 @@ export function saveCompletedOrder(run, soNumber, soId, rows) {
   });
 }
 
+/** Keep a deliberate omission and its cursor in a single transaction. */
+export function saveSkippedOrder(run, soNumber, reason) {
+  run.updatedAt = Date.now();
+  const skipped = { runKey: run.key, soNumber, status: 'skipped', reason, rows: [] };
+  return transact([RUNS, ORDERS], 'readwrite', tx => {
+    tx.objectStore(ORDERS).put(skipped);
+    tx.objectStore(RUNS).put(run);
+  });
+}
+
 export function clearCheckpoint(key) {
   return transact([RUNS, ORDERS], 'readwrite', tx => {
     tx.objectStore(RUNS).delete(key);

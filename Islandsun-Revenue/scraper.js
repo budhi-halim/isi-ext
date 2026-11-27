@@ -44,7 +44,7 @@ function showSavedProgress(run) {
     ? 'Saved delivery scan: ' + Math.max(0, run.latestDO - run.nextDO) + ' records checked.'
     : run.phase === 'ready'
       ? 'All ' + count + ' sales orders are saved. Resume to prepare the workbook.'
-      : 'Saved sales data: ' + (run.nextOrder || 0) + ' of ' + count + ' orders completed.';
+      : 'Saved sales data: ' + (run.nextOrder || 0) + ' of ' + count + ' orders processed (including skipped orders).';
   note.textContent = message + ' You can safely close and reopen this page.';
   note.hidden = false;
   restart.hidden = false;
@@ -60,7 +60,15 @@ async function refreshSavedProgress() {
     const endMonth = find('end-month').value;
     const valid = !validateMonths(startMonth, endMonth);
     const run = valid ? await checkpoints.loadCheckpoint(checkpoints.checkpointKey(origin, startMonth, endMonth)) : null;
-    if (ticket === previewNumber && !ui.running) showSavedProgress(run);
+    const orders = run && run.phase !== 'deliveries' ? await checkpoints.loadSavedOrders(run.key) : [];
+    if (ticket === previewNumber && !ui.running) {
+      showSavedProgress(run);
+      if (run || !workbookFile) {
+        const skipped = orders.filter(order => order.status === 'skipped')
+          .map(order => ({ soNumber: order.soNumber, reason: order.reason }));
+        ui.setSkippedOrders(skipped);
+      }
+    }
   } catch (error) {
     if (ticket === previewNumber) ui.log('Saved progress could not be read: ' + error.message, 'warn');
   }
@@ -90,7 +98,11 @@ async function saveWorkbook() {
     await downloadBlob(file.blob, file.name);
     if (ticket === runNumber) {
       ui.setPhaseState(3);
-      ui.log('Extraction complete. Excel workbook saved.', 'success');
+      if (file.skippedCount) {
+        ui.log('Incomplete workbook saved: ' + file.skippedCount + ' sales order(s) skipped. Review the report on this screen and in the Skipped Orders sheet.', 'warn');
+      } else {
+        ui.log('Extraction complete. Excel workbook saved.', 'success');
+      }
       try { await checkpoints.clearCheckpoint(file.checkpointKey); }
       catch (error) { ui.log('Workbook saved, but the old checkpoint could not be cleared: ' + error.message, 'warn'); }
     }
@@ -147,25 +159,29 @@ async function startProcess(event) {
     }
     saved = true;
 
-    const data = await runCoreScraper({
+    const { data, skipped, totalOrders } = await runCoreScraper({
       startMonthVal, endMonthVal,
       latestDO: checkpoint.latestDO, latestSO: checkpoint.latestSO,
       signal: controller.signal, ui, origin, checkpoint, checkpoints
     });
 
-    if (!data.length) {
+    if (!data.length && !skipped.length) {
       ui.log('No revenue rows were found for the selected months.', 'warn');
       await checkpoints.clearCheckpoint(key);
       return;
     }
 
+    if (skipped.length) {
+      ui.log('Sales order scan finished with ' + skipped.length + ' omitted order(s). The workbook will be marked incomplete.', 'warn');
+    }
     ui.log('Preparing the Excel workbook…');
-    const workbook = createRevenueWorkbook(data, globalThis.XLSX);
+    const workbook = createRevenueWorkbook(data, globalThis.XLSX, { skipped, totalOrders });
     const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     workbookFile = {
       blob: new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-      name: revenueFilename(startMonthVal, endMonthVal),
-      checkpointKey: key
+      name: revenueFilename(startMonthVal, endMonthVal, skipped.length > 0),
+      checkpointKey: key,
+      skippedCount: skipped.length
     };
     find('save-workbook').hidden = false;
     await saveWorkbook();
@@ -190,6 +206,8 @@ async function startOver() {
   if (!confirm('Discard saved extraction progress for these months? The sales data will need to be collected again.')) return;
   try {
     await checkpoints.clearCheckpoint(key);
+    workbookFile = null;
+    find('save-workbook').hidden = true;
     ui.reset();
     ui.log('Saved progress cleared. You can begin a new extraction.', 'info');
     await refreshSavedProgress();
