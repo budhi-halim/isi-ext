@@ -1,10 +1,23 @@
 import { fetchPortal as requestPortal, isLoginDocument, SessionExpiredError } from './shared/portal-session.js';
 export { PORTAL_ROOT, LOGIN_URL, SessionExpiredError, readPortalItems } from './shared/portal-session.js';
 
-/** Missing historical IDs may be skipped; connection failures must stop an incomplete export. */
+/** Missing historical IDs can be skipped; server failures must never masquerade as missing data. */
+export class PortalHttpError extends Error {
+  constructor(status) {
+    super('The company system returned HTTP ' + status + '.');
+    this.name = 'PortalHttpError';
+    this.status = status;
+  }
+}
+
+export function isTransientPortalError(error) {
+  if (error instanceof PortalHttpError) return [408, 425, 429].includes(error.status) || error.status >= 500;
+  return ['TimeoutError', 'TypeError', 'NetworkError'].includes(error?.name);
+}
+
 export async function fetchPortal(url, signal) {
   const response = await requestPortal(url, signal);
-  if (!response.ok && ![404, 410].includes(response.status)) throw new Error('The company connection is unavailable.');
+  if (!response.ok && ![404, 410].includes(response.status)) throw new PortalHttpError(response.status);
   return response;
 }
 
