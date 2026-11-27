@@ -17,7 +17,10 @@ export function isTransientPortalError(error) {
 
 export async function fetchPortal(url, signal) {
   const response = await requestPortal(url, signal);
-  if (!response.ok && ![404, 410].includes(response.status)) throw new PortalHttpError(response.status);
+  if (!response.ok && ![404, 410].includes(response.status)) {
+    await response.body?.cancel();
+    throw new PortalHttpError(response.status);
+  }
   return response;
 }
 
