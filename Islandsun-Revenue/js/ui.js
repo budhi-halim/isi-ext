@@ -65,6 +65,31 @@ export function createRevenueUI() {
     consoleArea.append(row);
     if (follow && find('activity-log').open) consoleArea.scrollTop = consoleArea.scrollHeight;
   }
+  function setSkippedOrders(orders) {
+    const report = find('skipped-report');
+    const summary = find('skipped-summary');
+    const list = find('skipped-list');
+    const previouslyEmpty = report.hidden;
+    report.hidden = orders.length === 0;
+    if (!orders.length) {
+      list.replaceChildren();
+      return;
+    }
+    summary.textContent = orders.length + ' skipped sales order' + (orders.length === 1 ? '' : 's') + ' — incomplete export';
+    const fragment = document.createDocumentFragment();
+    for (const order of orders) {
+      const row = document.createElement('li');
+      const number = document.createElement('strong');
+      number.textContent = order.soNumber;
+      const reason = document.createElement('span');
+      reason.textContent = order.reason;
+      row.append(number, reason);
+      fragment.append(row);
+    }
+    list.replaceChildren(fragment);
+    if (previouslyEmpty) report.open = true;
+  }
+
   function setRunning(value) {
     running = value;
     document.body.dataset.extractionState = value ? 'running' : 'idle';
@@ -89,8 +114,8 @@ export function createRevenueUI() {
   disclosure.addEventListener('toggle', followLog);
   frame = requestAnimationFrame(animate);
   return {
-    setProgress, setPhaseState, log, setRunning, waitForCompletion,
-    reset() { consoleArea.replaceChildren(); setProgress(0, true); setPhaseState(0); },
+    setProgress, setPhaseState, log, setRunning, setSkippedOrders, waitForCompletion,
+    reset() { consoleArea.replaceChildren(); setSkippedOrders([]); setProgress(0, true); setPhaseState(0); },
     get running() { return running; },
     destroy() { destroyed = true; cancelAnimationFrame(frame); disclosure.removeEventListener('toggle', followLog); }
   };
