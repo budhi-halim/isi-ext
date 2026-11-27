@@ -24,6 +24,8 @@
       <form id="extraction-form" novalidate>
         <div class="date-group"><label for="start-month">From<input aria-describedby="validation-message" type="month" id="start-month" required></label><label for="end-month">To<input aria-describedby="validation-message" type="month" id="end-month" required></label></div>
         <button id="start-button" class="isi-button isi-button--primary start-button" type="submit"><span id="start-spinner" class="isi-spinner" aria-hidden="true" hidden></span><span id="start-button-label">Begin Extraction</span></button>
+        <p id="resume-note" class="resume-note" aria-live="polite" hidden></p>
+        <button id="restart-button" class="isi-button isi-button--quiet restart-button" type="button" hidden>Start over (discard saved progress)</button>
       </form>
       <section class="progress-wrapper" aria-label="Extraction workflow">
         <div class="stepper-container">
