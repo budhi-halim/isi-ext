@@ -9,7 +9,7 @@ export function createRevenueWorkbook(finalData, XLSX, { skipped = [], totalOrde
     ? XLSX.utils.json_to_sheet(finalData)
     : XLSX.utils.aoa_to_sheet([REVENUE_COLUMNS]);
   const idrFormat = '_-"Rp"* #,##0.00_-;-"Rp"* #,##0.00_-;_-"Rp"* "-"??_-;_-@_-';
-  const usdFormat = '_-$* #,##0.00_-;-$* #,##0.00_-;_-$* "-"??_-;_-$* "-"??_-;_-@_-';
+  const usdFormat = '_-$* #,##0.00_-;-$* #,##0.00_-;_-$* "-"??_-;_-@_-';
   const range = XLSX.utils.decode_range(worksheet['!ref']);
 
   for (let R = 1; R <= range.e.r; ++R) {
