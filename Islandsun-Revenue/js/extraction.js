@@ -181,6 +181,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
     checkpoint.nextOrder = index + 1;
     await checkpoints.saveCompletedOrder(checkpoint, targetSO, pageData.id, rows);
     rowsByOrder.set(targetSO, rows);
+    savedByOrder.set(targetSO, { soNumber: targetSO, rows });
     currentPos = pageData.id;
     setProgress(Math.min(99, (index + 1) / totalTargets * 100));
   }
