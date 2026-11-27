@@ -211,7 +211,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
             break;
           }
         }
-        if (!found) throw new Error('A matching sales order could not be found.');
+        if (!found) throw new Error('Sales order ' + targetSO + ' could not be found in the expected record range. No incomplete workbook was exported.');
         break;
       }
 
