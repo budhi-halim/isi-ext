@@ -39,6 +39,10 @@
         <div class="progress-bar-bg" id="progress-meter" role="progressbar" aria-label="Delivery records progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-bar" id="progress-bar" data-active="false" data-complete="false"></div></div>
         <p id="status-text" role="status">Select the months to extract.</p>
         <p id="validation-message" class="isi-notice" data-tone="error" role="alert" hidden></p>
+        <details id="skipped-report" class="skipped-report" hidden>
+          <summary id="skipped-summary" aria-live="polite">Skipped sales orders</summary>
+          <ol id="skipped-list" aria-label="Sales orders omitted from the revenue export"></ol>
+        </details>
       </section>
       <details id="activity-log" class="activity-log"><summary>Activity log</summary><div id="console-area" tabindex="0" aria-label="Extraction activity" data-family-selectable></div></details>
       <div class="workspace-actions"><button id="save-workbook" type="button" class="isi-button" hidden>Save workbook</button><a href="https://budhi-halim.github.io/isi-share/" class="isi-button isi-button--quiet" data-family-home>All apps</a></div>
