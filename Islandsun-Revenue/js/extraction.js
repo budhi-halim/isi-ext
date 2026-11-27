@@ -1,9 +1,9 @@
 import { DEFAULT_PORTAL_ORIGIN, rebasePortalUrl } from './shared/portal-address.js';
-import { fetchPortal, pause, readRecord } from './portal.js';
+import { fetchPortal, isTransientPortalError, pause, readRecord } from './portal.js';
 import { createDateTrend } from './trend.js';
 import { extractData, getSoMagnitude } from './records.js';
 
-export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LATEST_DO_ID, latestSO: LATEST_SO_ID, signal, ui, origin = DEFAULT_PORTAL_ORIGIN }) {
+export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LATEST_DO_ID, latestSO: LATEST_SO_ID, signal, ui, origin = DEFAULT_PORTAL_ORIGIN, checkpoint, checkpoints }) {
   const { setProgress, setPhaseState, log, waitForCompletion } = ui;
   const root = rebasePortalUrl(`${DEFAULT_PORTAL_ORIGIN}/islandsun/`, origin);
   const fetch = url => fetchPortal(url, signal);
@@ -28,41 +28,53 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
   const totalTimeRangeMs = endMs - startMs;
 
   setProgress(0, true);
-  setPhaseState(1);
-  log(`Reading deliveries from ${targetStartDate} to ${targetEndDate}.`, 'info');
+  if (checkpoint.phase === 'deliveries') {
+    setPhaseState(1);
+    log('Reading deliveries from ' + targetStartDate + ' to ' + targetEndDate + '.', 'info');
+  } else {
+    setPhaseState(2);
+    log('Delivery scan already saved; restoring sales-order progress.', 'info');
+  }
 
   let currentDelay = 400;
   const MIN_DELAY = 100, MAX_DELAY = 30000;
 
   async function dynamicFetch(url) {
-    const startTime = performance.now();
-    let response;
-    try { response = await fetch(url); }
-    catch (error) {
-      signal.throwIfAborted();
-      if (error.name === 'SessionExpiredError') throw error;
-      currentDelay = Math.min(MAX_DELAY, currentDelay * 2);
-      await pause(currentDelay, signal);
-      throw error;
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const started = performance.now();
+      try {
+        const response = await fetch(url);
+        const latency = performance.now() - started;
+        if (response.ok) {
+          if (latency < 200) currentDelay = Math.max(MIN_DELAY, currentDelay - 50);
+          else if (latency > 800) currentDelay = Math.min(MAX_DELAY, currentDelay + 200);
+        }
+        await pause(currentDelay, signal);
+        return response;
+      } catch (error) {
+        signal.throwIfAborted();
+        if (!isTransientPortalError(error) || attempt === maxAttempts) throw error;
+        currentDelay = Math.min(MAX_DELAY, Math.max(800, currentDelay * 2));
+        const cause = error.status ? 'HTTP ' + error.status
+          : error.name === 'TimeoutError' ? 'request timed out' : 'temporary network failure';
+        log('Request failed (' + cause + '). Retrying ' + attempt + '/' + (maxAttempts - 1) + '…', 'warn');
+        await pause(currentDelay, signal);
+      }
     }
-    const latency = performance.now() - startTime;
-    if (response.ok) {
-      if (latency < 200) currentDelay = Math.max(MIN_DELAY, currentDelay - 50);
-      else if (latency > 800) currentDelay = Math.min(MAX_DELAY, currentDelay + 200);
-    } else if (response.status >= 429) {
-      currentDelay = Math.min(MAX_DELAY, currentDelay * 2);
-    }
-    await pause(currentDelay, signal);
-    return response;
   }
 
-  let currentDO = LATEST_DO_ID;
-  const targetSOs = new Set();
-  let emptyDoCount = 0;
-  let historicalStreak = 0;
-  let maxProgressSeen = 0;
+  let currentDO = checkpoint.nextDO;
+  const targetSOs = new Set(checkpoint.targets || []);
+  let emptyDoCount = checkpoint.emptyDoCount || 0;
+  let historicalStreak = checkpoint.historicalStreak || 0;
+  let maxProgressSeen = checkpoint.deliveryProgress || 0;
+  let checkedSinceSave = 0;
 
-  while (currentDO > 0) {
+  if (checkpoint.phase === 'deliveries') {
+    if (currentDO < LATEST_DO_ID) log('Resuming delivery scan at record #' + currentDO + '.', 'info');
+    setProgress(maxProgressSeen);
+    while (currentDO > 0) {
     try {
       const res = await dynamicFetch(doBaseUrl + currentDO);
       if (res.ok) {
@@ -117,27 +129,56 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
       throw err;
     }
     currentDO--;
+    checkpoint.nextDO = currentDO;
+    if (++checkedSinceSave >= 15) {
+      checkpoint.targets = Array.from(targetSOs);
+      checkpoint.emptyDoCount = emptyDoCount;
+      checkpoint.historicalStreak = historicalStreak;
+      checkpoint.deliveryProgress = maxProgressSeen;
+      await checkpoints.saveCheckpoint(checkpoint);
+      checkedSinceSave = 0;
+    }
+    }
+    checkpoint.targets = Array.from(targetSOs).sort((a, b) => getSoMagnitude(b) - getSoMagnitude(a));
+    checkpoint.phase = 'orders';
+    checkpoint.nextOrder = 0;
+    checkpoint.currentPos = LATEST_SO_ID;
+    await checkpoints.saveCheckpoint(checkpoint);
+    setProgress(100);
+    await waitForCompletion(signal);
   }
 
-  setProgress(100);
-
-  await waitForCompletion(signal);
-
-  if (targetSOs.size === 0) {
+  if (checkpoint.targets.length === 0) {
     log('No deliveries found for these months.', 'warn');
     return [];
   }
 
-  const sortedTargets = Array.from(targetSOs).sort((a, b) => getSoMagnitude(b) - getSoMagnitude(a));
-  log(`Reading ${sortedTargets.length} sales orders.`, 'info');
-
+  const sortedTargets = checkpoint.targets;
+  const totalTargets = sortedTargets.length;
+  const savedOrders = await checkpoints.loadSavedOrders(checkpoint.key);
+  const rowsByOrder = new Map(savedOrders.map(order => [order.soNumber, order.rows]));
+  const nextOrder = checkpoint.nextOrder || 0;
+  if (nextOrder < 0 || nextOrder > totalTargets ||
+      sortedTargets.slice(0, nextOrder).some(so => !rowsByOrder.has(so))) {
+    throw new Error('Saved sales data is inconsistent. Use Start over to scan this period again.');
+  }
+  log('Reading ' + totalTargets + ' sales orders (' + nextOrder + ' already saved).', 'info');
   await pause(400, signal);
   setProgress(0, true);
   setPhaseState(2);
+  setProgress(Math.min(99, nextOrder / totalTargets * 100));
 
-  const finalData = [];
-  let currentPos = LATEST_SO_ID;
-  const totalTargets = sortedTargets.length;
+  let currentPos = checkpoint.currentPos || LATEST_SO_ID;
+
+  async function completeOrder(pageData, targetSO, index) {
+    const rows = extractData(pageData.html, targetSO, pageData.id);
+    checkpoint.currentPos = pageData.id;
+    checkpoint.nextOrder = index + 1;
+    await checkpoints.saveCompletedOrder(checkpoint, targetSO, pageData.id, rows);
+    rowsByOrder.set(targetSO, rows);
+    currentPos = pageData.id;
+    setProgress(Math.min(99, (index + 1) / totalTargets * 100));
+  }
 
   async function tryFetch(id) {
     try {
@@ -150,12 +191,12 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
     return null;
   }
 
-  for (let i = 0; i < totalTargets; i++) {
+  for (let i = nextOrder; i < totalTargets; i++) {
     const targetSO = sortedTargets[i];
     const targetMag = getSoMagnitude(targetSO);
 
     log(`${i+1} of ${totalTargets}: ${targetSO}`, 'info');
-    setProgress(Math.min(99, ((i+1) / totalTargets) * 100));
+    setProgress(Math.min(99, (i / totalTargets) * 100));
 
     let low = 1000, high = currentPos, pos = currentPos, jump = 1, isBinarySearch = false;
 
@@ -165,8 +206,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
         for (let scanId = high; scanId >= low; scanId--) {
           const pageData = await tryFetch(scanId);
           if (pageData && pageData.soNumber === targetSO) {
-            finalData.push(...extractData(pageData.html, targetSO, pageData.id));
-            currentPos = pageData.id;
+            await completeOrder(pageData, targetSO, i);
             found = true;
             break;
           }
@@ -184,8 +224,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
       }
 
       if (pageData.soNumber === targetSO) {
-        finalData.push(...extractData(pageData.html, targetSO, pageData.id));
-        currentPos = pageData.id;
+        await completeOrder(pageData, targetSO, i);
         break;
       }
 
@@ -203,5 +242,15 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
 
   setProgress(100);
   await waitForCompletion(signal);
+  checkpoint.phase = 'ready';
+  await checkpoints.saveCheckpoint(checkpoint);
+
+  // Rebuild strictly in target order, including orders processed in earlier sessions.
+  const finalData = [];
+  for (const so of sortedTargets) {
+    const rows = rowsByOrder.get(so);
+    if (!rows) throw new Error('Saved sales data is missing for ' + so + '. Use Start over.');
+    finalData.push(...rows);
+  }
   return finalData;
 }
