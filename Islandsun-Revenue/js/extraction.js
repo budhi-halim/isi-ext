@@ -191,6 +191,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
     checkpoint.nextOrder = index + 1;
     // Never adjust currentPos when an order is skipped: we have no verified ID.
     await checkpoints.saveSkippedOrder(checkpoint, targetSO, reason);
+    savedByOrder.set(targetSO, { soNumber: targetSO, rows: [], status: 'skipped', reason });
     skippedOrders.push({ soNumber: targetSO, reason });
     ui.setSkippedOrders(skippedOrders);
     setProgress(Math.min(99, (index + 1) / totalTargets * 100));
@@ -228,7 +229,7 @@ export async function runCoreScraper({ startMonthVal, endMonthVal, latestDO: LAT
   // Rebuild strictly in target order, retaining the omissions in a separate report.
   const finalData = [];
   for (const so of sortedTargets) {
-    if (savedByOrder.get(so)?.status === 'skipped' || skippedOrders.some(item => item.soNumber === so)) continue;
+    if (savedByOrder.get(so)?.status === 'skipped') continue;
     const rows = rowsByOrder.get(so);
     if (!rows) throw new Error('Saved sales data is missing for ' + so + '. Use Start over.');
     finalData.push(...rows);
