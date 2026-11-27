@@ -4,7 +4,7 @@ import { getSoMagnitude } from './records.js';
 // (for example different branch codes) may be interleaved in the portal.
 // Try the saved cursor first for speed, then retry from the full latest ID.
 const FIRST_SO_ID = 1000;
-const MAX_PROBES = 120;
+const MAX_PROBES = 60;
 
 async function searchWithinRange(targetSO, upperBound, readOrder) {
   if (!Number.isSafeInteger(upperBound) || upperBound < FIRST_SO_ID) return null;
